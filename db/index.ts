@@ -1,17 +1,28 @@
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "./schema";
+import "server-only";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-export async function getD1() {
-  // Keep the native Worker module behind a dynamic boundary so the validated
-  // server artifact can be imported by Node without executing a cloud runtime import.
-  const { env } = await import("cloudflare:workers");
-  if (!env.DB) {
-    throw new Error("Cloudflare D1 binding `DB` is unavailable.");
-  }
+let adminClient: SupabaseClient | null = null;
 
-  return env.DB;
+export function getSupabaseAdmin(): SupabaseClient | null {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceRoleKey) return null;
+
+  adminClient ??= createClient(url, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+
+  return adminClient;
 }
 
-export async function getDb() {
-  return drizzle(await getD1(), { schema });
+export function requireSupabaseAdmin(): SupabaseClient {
+  const client = getSupabaseAdmin();
+  if (!client) {
+    throw new Error("Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+  }
+  return client;
 }

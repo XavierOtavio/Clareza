@@ -1,114 +1,78 @@
-# Deploying Clareza on Vercel
+# Deploying Clareza to Vercel
 
-## Important compatibility constraint
+The repository uses the standard Next.js lifecycle and no longer depends on Cloudflare Workers, Vinext, D1, Vite, or Wrangler. Vercel can build it directly. Supabase is the persistent PostgreSQL service used by the finance API.
 
-This recovered source is the exact functional Sites version. Its server runtime is Vinext on Cloudflare Workers and its persistent database is Cloudflare D1. The finance API imports the native `cloudflare:workers` runtime module and expects a `DB` binding. Vercel does not provide either capability.
+## 1. Create and migrate Supabase
 
-Consequently, importing this repository into Vercel without a persistence migration is not a valid production deployment. The page may render, but `/api/finance` will not have a database and financial write operations will fail. Do not hide that failure by relying on the client demonstration fallback.
+Use separate Supabase projects for preview and production when real data is introduced.
 
-## Recommended Vercel target
+Run `supabase/migrations/202607100001_clareza_foundation.sql` in the Supabase SQL editor. Alternatively, link the Supabase CLI and run:
 
-Use the following target architecture:
+```bash
+supabase db push
+```
 
-- Standard Next.js App Router on Vercel;
-- Supabase PostgreSQL for structured financial data;
-- Supabase Auth for public authentication and MFA;
-- Supabase Storage for private documents;
-- Vercel Functions for API routes and bank callbacks;
-- Vercel Cron or Supabase scheduled functions for synchronisation;
-- a licensed AISP implementation behind the existing `BankDataProvider` contract.
+The migration creates the demonstration financial schema, indexes, workspace membership boundary, and Row Level Security policies. The current API deliberately uses the server service role for a fixed demonstration workspace; public multi-user authentication is not implemented yet.
 
-## Required migration work
+## 2. Import the GitHub repository
 
-### 1. Create the Supabase project
+1. In Vercel, select **Add New → Project**.
+2. Import `XavierOtavio/Clareza` and select the Vercel-ready branch or merge its pull request first.
+3. Keep **Framework Preset** set to **Next.js**.
+4. Leave the build command as `npm run build` and the output directory on the Next.js default.
+5. Use Node.js 22 in Project Settings if Vercel does not infer it from `package.json`.
 
-Create separate development, preview, and production projects. Record the project URL, public anonymous key, and server-only service-role key in the relevant Vercel environment. Never expose the service-role key through a `NEXT_PUBLIC_` variable.
+## 3. Configure environment variables
 
-Suggested variables:
+Add the following values in **Project Settings → Environment Variables**. Apply them independently to Preview and Production as appropriate.
 
 ```text
-NEXT_PUBLIC_APP_URL=https://your-domain.example
+NEXT_PUBLIC_APP_URL=https://your-vercel-domain.vercel.app
+NEXT_PUBLIC_DEMO_USER_NAME=Tiago
+NEXT_PUBLIC_DEMO_USER_EMAIL=modo@demonstracao.pt
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+BANK_DATA_PROVIDER=mock
+```
+
+The following variables are placeholders for later authentication and real Open Banking work:
+
+```text
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-BANK_DATA_PROVIDER=mock
 BANK_DATA_CLIENT_ID=
 BANK_DATA_CLIENT_SECRET=
 BANK_DATA_WEBHOOK_SECRET=
 BANK_TOKEN_ENCRYPTION_KEY=
 ```
 
-### 2. Convert the current schema to PostgreSQL
+Never use a `NEXT_PUBLIC_` prefix for the Supabase service-role key or banking secrets.
 
-The current phase-one schema is defined in `db/schema.ts` and `drizzle/0000_swift_maggott.sql`. Recreate the following tables in PostgreSQL:
+## 4. Deploy and smoke-test
 
-- `workspaces`;
-- `accounts`;
-- `transactions`;
-- `budgets`;
-- `goals`;
-- `bank_connections`;
-- `audit_events`.
+Deploy from Vercel, then verify:
 
-Preserve all primary keys, foreign keys, unique provider identifiers, workspace indexes, integer minor-unit money fields, and `ON DELETE CASCADE` relationships. Add `workspace_members` before enabling multiple users.
+- `/` loads with the **Demonstração** label;
+- `/api/finance` returns HTTP 200 after Supabase is configured;
+- a manual account persists after a refresh;
+- category, budget, and goal changes persist;
+- the mock bank connection imports data without duplicate provider transactions;
+- CSV export and report printing work;
+- the PWA manifest and service worker load;
+- no service-role or provider secret appears in browser responses or logs.
 
-Apply Row Level Security to every workspace-owned table. A policy must allow access only when the authenticated user is a member of the row's workspace. Test cross-workspace reads, writes, updates, and deletes before using real data.
+If `/api/finance` returns HTTP 503, confirm that both `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present in the selected Vercel environment and redeploy.
 
-### 3. Replace the D1 adapter
+## 5. Custom domain and deployment protection
 
-Replace `db/index.ts` with server-only Supabase clients:
+Attach the custom domain only after the preview smoke tests pass. For demonstrations containing any non-public data, enable Vercel deployment protection and restrict the Supabase project. The current build is not suitable for real personal or bank data.
 
-- a user-scoped client for normal reads and writes;
-- a service-role client only for verified callbacks, background synchronisation, and narrowly defined administrative operations.
+## Required work before production use
 
-Do not scatter Supabase calls throughout React components. Keep persistence behind domain repositories so calculations and `BankDataProvider` remain independent of the database vendor.
-
-Update `app/api/finance/route.ts` to use the PostgreSQL repositories instead of `getD1()`. Preserve server-side validation, workspace scoping, idempotent inserts, and audit events.
-
-### 4. Return to the standard Next.js build
-
-After the persistence adapter is migrated:
-
-1. Remove the Cloudflare-specific Vite, Vinext, Worker, D1, and Wrangler build dependencies.
-2. Remove `worker/`, `vite.config.ts`, `cloudflare-env.d.ts`, and the D1 binding from `.openai/hosting.json` only in the Vercel-specific branch.
-3. Change the scripts to use the standard Next.js lifecycle:
-
-```json
-{
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "test:unit": "node --experimental-strip-types --test tests/finance-calculations.test.ts"
-  }
-}
-```
-
-4. Run the type check, unit tests, and `npm run build` locally.
-
-### 5. Import into Vercel
-
-1. Push the migrated Vercel branch to a Git repository.
-2. In Vercel, choose **Add New Project** and import that repository.
-3. Keep **Framework Preset** set to Next.js.
-4. Add the environment variables separately for Development, Preview, and Production.
-5. Deploy and verify `/`, `/api/finance`, authentication, workspace isolation, CSV export, and every write flow.
-6. Configure the bank provider callback and webhook URLs using the final HTTPS domain.
-
-## Minimum verification before real financial data
-
-- no D1 or `cloudflare:workers` imports remain in the Vercel build;
-- every finance API request resolves an authenticated workspace server-side;
-- RLS blocks access between workspaces;
-- money remains integer minor units or PostgreSQL `numeric`, never floating point;
-- bank tokens are encrypted and never returned to the browser;
-- callback state and webhook signatures are verified;
-- duplicate provider transactions are rejected idempotently;
-- pending transactions reconcile with booked transactions;
-- logs contain no tokens, complete IBANs, documents, or sensitive financial payloads;
-- desktop and mobile end-to-end tests pass in the Vercel preview environment.
-
-## Fast but limited alternative
-
-For a visual-only demonstration, the frontend can be published after replacing `/api/finance` with a non-persistent mock route. That is not equivalent to this functional build and must be labelled as a demonstration. It must not be used for real accounts, consent tokens, or personal financial data.
+- Supabase Auth with MFA or passkeys and server-side workspace resolution;
+- user-scoped data access plus tested RLS isolation;
+- a contracted licensed AISP implementation behind `BankDataProvider`;
+- encrypted provider tokens, validated callback state and webhook signatures;
+- pending-to-booked reconciliation, incremental synchronisation, retries, rate limits, and consent renewal;
+- data export, erasure, retention, backup recovery, monitoring, and incident procedures;
+- Playwright journeys, security assessment, accessibility audit, and legal review.

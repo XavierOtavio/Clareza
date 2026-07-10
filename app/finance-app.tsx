@@ -387,12 +387,12 @@ function NetWorthChart() {
 
 function DonutChart({ items, total }: { items: [string, number][]; total: number }) {
   const colors = ["#1e7f61", "#6bb692", "#d7a84f", "#d8735a", "#7486a6"];
-  let cursor = 0;
-  const stops = items.map(([, amount], index) => {
-    const start = cursor;
-    cursor += total ? (amount / total) * 100 : 0;
-    return `${colors[index]} ${start}% ${cursor}%`;
-  });
+  const boundaries = items.reduce<number[]>((values, [, amount]) => {
+    const previous = values.at(-1) ?? 0;
+    return [...values, previous + (total ? (amount / total) * 100 : 0)];
+  }, []);
+  const stops = items.map((_, index) => `${colors[index]} ${boundaries[index - 1] ?? 0}% ${boundaries[index]}%`);
+  const cursor = boundaries.at(-1) ?? 0;
   if (cursor < 100) stops.push(`#e9ece8 ${cursor}% 100%`);
   return <div className="donut" style={{ background: `conic-gradient(${stops.join(",")})` }} role="img" aria-label={`Despesas contabilizadas: ${formatMoney(total)}`}><div><span>Total</span><strong>{formatMoney(total)}</strong><small>Julho</small></div></div>;
 }
