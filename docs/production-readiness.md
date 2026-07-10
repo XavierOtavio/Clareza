@@ -1,22 +1,32 @@
 # Production-readiness limits
 
-This build is a functional first vertical slice, not a regulated production release.
+This repository is deployable to Vercel as a functional demonstration. It is not a regulated production release and must not process real personal or bank data in its current form.
+
+## Implemented deployment foundation
+
+- Standard Next.js build and Vercel configuration.
+- Supabase PostgreSQL migration with constraints, indexes, workspace membership, and RLS policies.
+- Server-only persistence client and no Cloudflare runtime dependency.
+- Integer minor-unit money fields and deterministic financial calculations.
+- Labelled mock Open Banking provider and idempotent provider transaction identifiers.
+- Explicitly fictitious data and a non-persistent fallback when Supabase is absent.
 
 ## Required before real users or real bank data
 
-- Select and contract a licensed AISP with verified Portuguese and EU bank coverage.
-- Implement callback, consent renewal, webhook verification, token encryption, idempotent incremental synchronisation, pending-to-booked reconciliation, retries, rate limiting, and circuit breaking.
-- Replace demonstration identity with a reviewed public authentication path, MFA or passkeys, session protection, recovery, and workspace membership controls.
-- Implement the complete PostgreSQL/Supabase schema, Row Level Security policies, cross-workspace isolation tests, private document storage, retention, erasure, and anonymisation.
-- Separate original provider data from user corrections, splits, tags, and categorisation rules.
-- Add encrypted backups, tested restoration, incident response, observability without sensitive values, and secret rotation.
-- Complete DPIA/privacy review, legal terms, consent records, supplier contracts, security assessment, penetration testing, accessibility audit, and operational runbooks.
-- Add Vitest integration tests and Playwright desktop/mobile journeys for authentication, callbacks, revocation, CSV imports, RLS, and failure recovery.
+- Implement Supabase Auth, MFA or passkeys, secure recovery, and server-side user/workspace resolution.
+- Replace fixed demonstration service-role operations with user-scoped clients; reserve service-role access for verified callbacks and background jobs.
+- Test cross-workspace reads, inserts, updates, and deletes against RLS.
+- Select and contract a licensed AISP with verified Portuguese and EU coverage.
+- Implement callback state, consent renewal, webhook signatures, encrypted tokens, incremental synchronisation, pending-to-booked reconciliation, retries, rate limiting, and circuit breaking.
+- Separate provider source data from user corrections, splits, tags, and categorisation rules.
+- Add private document storage, personal data export and erasure, retention, anonymisation, encrypted backups, restoration tests, incident response, and secret rotation.
+- Complete DPIA/privacy work, terms, consent records, supplier contracts, security assessment, penetration testing, accessibility audit, and operational runbooks.
+- Add integration and Playwright desktop/mobile journeys for authentication, callbacks, revocation, CSV imports, RLS, and failure recovery.
 
-## Deliberate first-slice substitutions
+## Deliberate demonstration substitutions
 
-- Cloudflare D1 is used by the current hosted environment instead of Supabase PostgreSQL. Financial and banking boundaries are isolated so the persistence adapter can be replaced, but that migration is not implemented yet.
-- The Open Banking flow is a labelled mock. It proves the interface and idempotent import behaviour but does not prove bank coverage or regulatory compliance.
-- Forecasts use labelled demonstration assumptions. They are not advice or guarantees.
-- PDF export currently uses the browser print-to-PDF flow; a server-rendered, archived report is future work.
-- Documents, family invitations, investments, debt amortisation, recurring-item detection, AI insights, and data erasure are represented in the roadmap but not implemented in this slice.
+- The finance API uses one fixed demonstration workspace and a server-only Supabase service-role client.
+- Open Banking is a labelled mock; it proves the interface and deduplication boundary, not bank coverage or regulatory compliance.
+- Forecasts are labelled scenarios, not advice or guarantees.
+- PDF export uses browser print-to-PDF rather than an archived server-rendered report.
+- Family invitations, documents, investments, debt amortisation, recurring-item detection, AI insights, and complete data erasure remain roadmap work.

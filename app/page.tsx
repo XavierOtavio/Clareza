@@ -1,16 +1,8 @@
-import { headers } from "next/headers";
 import { FinanceApp } from "./finance-app";
 
-export const dynamic = "force-dynamic";
+export default function Home() {
+  const name = process.env.NEXT_PUBLIC_DEMO_USER_NAME?.trim() || "Tiago";
+  const email = process.env.NEXT_PUBLIC_DEMO_USER_EMAIL?.trim() || "modo@demonstracao.pt";
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedName = requestHeaders.get("oai-authenticated-user-full-name");
-  const name =
-    encodedName && requestHeaders.get("oai-authenticated-user-full-name-encoding") === "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedName)
-      : null;
-
-  return <FinanceApp viewer={{ name: name ?? "Tiago", email: email ?? "modo@demonstracao.pt" }} />;
+  return <FinanceApp viewer={{ name, email }} />;
 }

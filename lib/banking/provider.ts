@@ -65,6 +65,8 @@ export class MockBankDataProvider implements BankDataProvider {
   }
 
   async createConnection(institutionId: string, _redirectUri: string, _state: string) {
+    void _redirectUri;
+    void _state;
     const institution = DEMO_INSTITUTIONS.find((item) => item.id === institutionId);
     if (!institution) throw new Error("Instituição de demonstração desconhecida.");
     return {
@@ -81,6 +83,7 @@ export class MockBankDataProvider implements BankDataProvider {
   }
 
   async fetchAccounts(_connectionId: string) {
+    void _connectionId;
     return [
       { id: "mock-daily", name: "Conta Dia-a-dia", type: "checking" as const, currency: "EUR", bookedBalanceCents: 246810, availableBalanceCents: 239610 },
       { id: "mock-reserve", name: "Reserva", type: "savings" as const, currency: "EUR", bookedBalanceCents: 430000, availableBalanceCents: 430000 },
@@ -93,6 +96,8 @@ export class MockBankDataProvider implements BankDataProvider {
   }
 
   async fetchTransactions(_connectionId: string, _since?: string) {
+    void _connectionId;
+    void _since;
     return [
       { id: "mock-tx-coffee", accountId: "mock-daily", description: "Fábrica Coffee Roasters", merchant: "Fábrica Coffee Roasters", amountCents: -420, currency: "EUR", status: "booked" as const, bookedAt: "2026-07-09" },
       { id: "mock-tx-pharmacy", accountId: "mock-daily", description: "Farmácia Central", merchant: "Farmácia Central", amountCents: -1865, currency: "EUR", status: "pending" as const, bookedAt: "2026-07-10" },
@@ -109,5 +114,7 @@ export class MockBankDataProvider implements BankDataProvider {
     };
   }
 
-  async revokeConsent(_connectionId: string) {}
+  async revokeConsent(_connectionId: string) {
+    void _connectionId;
+  }
 }
