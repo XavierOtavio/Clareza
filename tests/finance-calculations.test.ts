@@ -43,3 +43,22 @@ test("excludes pending and internal transfers from consumption", () => {
   assert.equal(result.pending, 75_00);
   assert.deepEqual(result.spendByCategory, { Housing: 400_00 });
 });
+
+test("excludes hidden accounts and their transactions from every total", () => {
+  const result = calculateMetrics({
+    accounts: [
+      { id: "visible", type: "checking", balanceCents: 1_000_00, isHidden: false },
+      { id: "hidden", type: "checking", balanceCents: 9_000_00, isHidden: true },
+    ],
+    transactions: [
+      { accountId: "visible", amountCents: -100_00, category: "Food", status: "booked", isInternalTransfer: false },
+      { accountId: "hidden", amountCents: -900_00, category: "Travel", status: "booked", isInternalTransfer: false },
+      { accountId: "hidden", amountCents: -50_00, category: "Other", status: "pending", isInternalTransfer: false },
+    ],
+  });
+
+  assert.equal(result.assets, 1_000_00);
+  assert.equal(result.expenses, 100_00);
+  assert.equal(result.pending, 0);
+  assert.deepEqual(result.spendByCategory, { Food: 100_00 });
+});

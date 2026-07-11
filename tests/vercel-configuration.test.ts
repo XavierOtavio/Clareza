@@ -36,5 +36,9 @@ test("declares Vercel and Supabase deployment assets", () => {
   assert.equal(vercel.framework, "nextjs");
   assert.deepEqual(vercel.regions, ["fra1"]);
   assert.match(read("supabase/migrations/202607100001_clareza_foundation.sql"), /enable row level security/i);
+  const financialCoreMigration = read("supabase/migrations/202607110001_financial_core.sql");
+  assert.match(financialCoreMigration, /transactions_import_fingerprint_unique/i);
+  assert.match(financialCoreMigration, /transaction_user_edits/i);
+  assert.match(financialCoreMigration, /members manage categorization rules/i);
   assert.match(read(".env.example"), /SUPABASE_SERVICE_ROLE_KEY=/);
 });

@@ -2,9 +2,10 @@
 
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { calculateMetrics, parseMoneyToCents } from "@/lib/finance/calculations";
+import { parseCsvText, suggestCsvColumnMapping, type CsvColumnMapping, type ParsedCsv } from "@/lib/transactions/csv";
 
 type View = "overview" | "accounts" | "transactions" | "budgets" | "planning" | "wealth" | "reports" | "settings";
-type Modal = "account" | "bank" | "budget" | "goal" | "accountDetails" | null;
+type Modal = "account" | "bank" | "budget" | "goal" | "accountDetails" | "transaction" | "csvImport" | "rule" | "category" | null;
 
 type Account = {
   id: string;
@@ -26,11 +27,18 @@ type Transaction = {
   amountCents: number;
   currency: string;
   category: string;
+  categoryId?: string | null;
+  categorySource?: "original" | "rule" | "user";
+  categorizationConfidence?: number | null;
   status: "pending" | "booked";
   bookedAt: string;
+  source?: "synced" | "manual" | "imported";
   isInternalTransfer: number | boolean;
 };
 
+type Category = { id: string; name: string; kind: "expense" | "income" | "transfer"; isSystem: boolean };
+type CategorizationRule = { id: string; name: string; field: "description" | "merchant"; operator: "contains" | "equals" | "starts_with"; pattern: string; categoryId: string; categoryName: string; priority: number; isActive: boolean };
+type ImportJob = { id: string; fileName: string; status: string; totalRows: number; importedRows: number; duplicateRows: number; invalidRows: number; createdAt: string };
 type Budget = { id: string; category: string; limitCents: number; month: string; rollover: number | boolean };
 type Goal = { id: string; name: string; targetCents: number; currentCents: number; targetDate?: string | null; priority: "low" | "medium" | "high" };
 type Connection = { id: string; provider: string; institutionId: string; institutionName: string; status: string; lastSyncedAt?: string | null; consentExpiresAt?: string | null };
@@ -41,6 +49,9 @@ type FinanceState = {
   workspace: { id: string; name: string; type: string; isDemo: number | boolean };
   accounts: Account[];
   transactions: Transaction[];
+  categories: Category[];
+  rules: CategorizationRule[];
+  imports: ImportJob[];
   budgets: Budget[];
   goals: Goal[];
   connections: Connection[];
@@ -68,6 +79,21 @@ const FALLBACK_STATE: FinanceState = {
     { id: "tx-rent", accountId: "acc-main", description: "Renda de casa", merchant: "Senhorio", amountCents: -78000, currency: "EUR", category: "Habitação", status: "booked", bookedAt: "2026-07-02", isInternalTransfer: false },
     { id: "tx-salary", accountId: "acc-main", description: "Salário", merchant: "Deloitte", amountCents: 248500, currency: "EUR", category: "Rendimentos", status: "booked", bookedAt: "2026-07-01", isInternalTransfer: false },
   ],
+  categories: [
+    { id: "category-home", name: "Casa", kind: "expense", isSystem: true },
+    { id: "category-housing", name: "Habitação", kind: "expense", isSystem: true },
+    { id: "category-grocery", name: "Supermercado", kind: "expense", isSystem: true },
+    { id: "category-transport", name: "Transportes", kind: "expense", isSystem: true },
+    { id: "category-restaurants", name: "Restaurantes", kind: "expense", isSystem: true },
+    { id: "category-health", name: "Saúde", kind: "expense", isSystem: true },
+    { id: "category-education", name: "Educação", kind: "expense", isSystem: true },
+    { id: "category-leisure", name: "Lazer", kind: "expense", isSystem: true },
+    { id: "category-income", name: "Rendimentos", kind: "income", isSystem: true },
+    { id: "category-transfer", name: "Transferência", kind: "transfer", isSystem: true },
+    { id: "category-other", name: "Outros", kind: "expense", isSystem: true },
+  ],
+  rules: [],
+  imports: [],
   budgets: [
     { id: "budget-home", category: "Habitação", limitCents: 85000, month: "2026-07", rollover: false },
     { id: "budget-market", category: "Supermercado", limitCents: 30000, month: "2026-07", rollover: false },
@@ -81,7 +107,6 @@ const FALLBACK_STATE: FinanceState = {
   connections: [{ id: "connection-demo", provider: "mock", institutionId: "pt-demo-lusitano", institutionName: "Banco Lusitano — Demonstração", status: "connected", lastSyncedAt: "2026-07-10T10:42:00.000Z", consentExpiresAt: "2026-09-27T23:59:59.000Z" }],
 };
 
-const CATEGORIES = ["Casa", "Habitação", "Supermercado", "Transportes", "Restaurantes", "Saúde", "Educação", "Lazer", "Rendimentos", "Outros"];
 const NAVIGATION: { id: View; label: string; icon: IconName }[] = [
   { id: "overview", label: "Visão geral", icon: "overview" },
   { id: "accounts", label: "Contas", icon: "wallet" },
@@ -237,7 +262,7 @@ export function FinanceApp({ viewer }: { viewer: { name: string; email: string }
         <div className="page-content">
           {view === "overview" && <Overview data={data} metrics={metrics} alerts={alerts} onNavigate={changeView} onDismissAlert={(id) => setDismissedAlerts((items) => [...items, id])} />}
           {view === "accounts" && <AccountsPage data={data} metrics={metrics} onAdd={() => setModal("account")} onConnect={() => setModal("bank")} onOpenAccount={openAccount} onDisconnect={(id) => perform({ type: "disconnectBank", connectionId: id }, "Ligação revogada com sucesso.")} busy={busy} />}
-          {view === "transactions" && <TransactionsPage data={data} onCategoryChange={(transactionId, category) => perform({ type: "updateTransactionCategory", transactionId, category }, "Categoria actualizada.")} busy={busy} />}
+          {view === "transactions" && <TransactionsPage data={data} onCategoryChange={(transactionId, categoryId) => perform({ type: "updateTransactionCategory", transactionId, categoryId }, "Categoria actualizada sem alterar os dados originais.")} onAddTransaction={() => setModal("transaction")} onImport={() => setModal("csvImport")} onAddRule={() => setModal("rule")} onAddCategory={() => setModal("category")} onToggleRule={(ruleId, isActive) => perform({ type: "toggleCategorizationRule", ruleId, isActive }, isActive ? "Regra activada." : "Regra desactivada.")} onDeleteRule={(ruleId) => perform({ type: "deleteCategorizationRule", ruleId }, "Regra eliminada.")} busy={busy} />}
           {view === "budgets" && <BudgetsPage data={data} metrics={metrics} onAdd={() => setModal("budget")} />}
           {view === "planning" && <PlanningPage data={data} onAdd={() => setModal("goal")} />}
           {view === "wealth" && <WealthPage data={data} metrics={metrics} />}
@@ -247,7 +272,7 @@ export function FinanceApp({ viewer }: { viewer: { name: string; email: string }
       </main>
 
       <MobileNavigation activeView={view} onNavigate={changeView} />
-      {modal && <ModalLayer modal={modal} data={data} selectedAccount={selectedAccount} busy={busy} onClose={() => setModal(null)} onSubmit={perform} />}
+      {modal && <ModalLayer modal={modal} data={data} selectedAccount={selectedAccount} busy={busy} onClose={() => setModal(null)} onSubmit={perform} onToggleAccountVisibility={(accountId, isHidden) => perform({ type: "toggleAccountVisibility", accountId, isHidden }, isHidden ? "Conta ocultada dos totais." : "Conta novamente incluída nos totais.")} />}
       {toast && <div className="toast" role="status"><Icon name="check" />{toast}</div>}
     </div>
   );
@@ -409,16 +434,17 @@ function GoalMini({ goal }: { goal: Goal }) {
 }
 
 function AccountsPage({ data, metrics, onAdd, onConnect, onOpenAccount, onDisconnect, busy }: { data: FinanceState; metrics: Metrics; onAdd: () => void; onConnect: () => void; onOpenAccount: (account: Account) => void; onDisconnect: (id: string) => void; busy: boolean }) {
+  const visibleAccounts = data.accounts.filter((account) => !Boolean(account.isHidden));
   return (
     <>
       <section className="subpage-summary surface-card">
-        <div><span>Saldo contabilístico total</span><strong>{formatMoney(data.accounts.reduce((sum, account) => sum + account.balanceCents, 0))}</strong><small>Em {data.accounts.length} contas · {formatMoney(metrics.pending)} pendentes separados</small></div>
+        <div><span>Saldo contabilístico total</span><strong>{formatMoney(visibleAccounts.reduce((sum, account) => sum + account.balanceCents, 0))}</strong><small>Em {visibleAccounts.length} contas incluídas · {formatMoney(metrics.pending)} pendentes separados</small></div>
         <div className="summary-divider" /><div><span>Disponível para utilizar</span><strong>{formatMoney(metrics.available)}</strong><small>Última sincronização às 10:42</small></div>
         <div className="summary-actions"><button className="secondary-button" type="button" onClick={onConnect}><Icon name="link" /> Ligar banco</button><button className="primary-button" type="button" onClick={onAdd}><Icon name="plus" /> Conta manual</button></div>
       </section>
 
       <div className="section-heading page-section-heading"><div><p className="section-kicker">Todas as fontes</p><h2>Contas</h2></div><span className="source-legend"><i className="synced" /> Sincronizada <i className="manual" /> Manual</span></div>
-      <section className="accounts-grid">{data.accounts.map((account) => <button className="account-card surface-card" type="button" key={account.id} onClick={() => onOpenAccount(account)}><span className={`account-logo ${account.type}`}><Icon name={account.type === "credit" ? "card" : account.type === "savings" ? "spark" : account.type === "cash" ? "cash" : "bank"} /></span><span className="account-source"><i className={account.source} />{account.source === "synced" ? "Sincronizada" : account.source === "manual" ? "Manual" : "Importada"}</span><span className="account-name">{account.name}<small>{account.institutionName ?? "Introdução manual"}</small></span><strong>{formatMoney(account.balanceCents)}</strong><span className="account-available">Disponível: {formatMoney(account.availableBalanceCents ?? account.balanceCents)}</span><Icon name="arrow" /></button>)}</section>
+      <section className="accounts-grid">{data.accounts.map((account) => <button className={`account-card surface-card ${account.isHidden ? "hidden-account" : ""}`} type="button" key={account.id} onClick={() => onOpenAccount(account)}><span className={`account-logo ${account.type}`}><Icon name={account.type === "credit" ? "card" : account.type === "savings" ? "spark" : account.type === "cash" ? "cash" : "bank"} /></span><span className="account-source"><i className={account.source} />{account.source === "synced" ? "Sincronizada" : account.source === "manual" ? "Manual" : "Importada"}{account.isHidden && " · Fora dos totais"}</span><span className="account-name">{account.name}<small>{account.institutionName ?? "Introdução manual"}</small></span><strong>{formatMoney(account.balanceCents)}</strong><span className="account-available">Disponível: {formatMoney(account.availableBalanceCents ?? account.balanceCents)}</span><Icon name="arrow" /></button>)}</section>
 
       <section className="surface-card connections-section">
         <div className="section-heading"><div><p className="section-kicker">Open Banking</p><h2>Ligações bancárias</h2></div><button className="secondary-button" type="button" onClick={onConnect}><Icon name="plus" /> Nova ligação</button></div>
@@ -429,34 +455,52 @@ function AccountsPage({ data, metrics, onAdd, onConnect, onOpenAccount, onDiscon
   );
 }
 
-function TransactionsPage({ data, onCategoryChange, busy }: { data: FinanceState; onCategoryChange: (id: string, category: string) => void; busy: boolean }) {
+function TransactionsPage({ data, onCategoryChange, onAddTransaction, onImport, onAddRule, onAddCategory, onToggleRule, onDeleteRule, busy }: { data: FinanceState; onCategoryChange: (id: string, categoryId: string) => void; onAddTransaction: () => void; onImport: () => void; onAddRule: () => void; onAddCategory: () => void; onToggleRule: (id: string, isActive: boolean) => void; onDeleteRule: (id: string) => void; busy: boolean }) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todas");
   const [status, setStatus] = useState("Todos");
+  const [accountId, setAccountId] = useState("Todas");
+  const [sort, setSort] = useState("date-desc");
   const filtered = data.transactions.filter((transaction) => {
     const matchesSearch = `${transaction.description} ${transaction.merchant ?? ""}`.toLowerCase().includes(search.toLowerCase());
-    return matchesSearch && (category === "Todas" || transaction.category === category) && (status === "Todos" || transaction.status === status);
+    return matchesSearch && (category === "Todas" || transaction.category === category) && (status === "Todos" || transaction.status === status) && (accountId === "Todas" || transaction.accountId === accountId);
+  }).sort((left, right) => {
+    if (sort === "date-asc") return left.bookedAt.localeCompare(right.bookedAt);
+    if (sort === "amount-desc") return Math.abs(right.amountCents) - Math.abs(left.amountCents);
+    if (sort === "amount-asc") return Math.abs(left.amountCents) - Math.abs(right.amountCents);
+    return right.bookedAt.localeCompare(left.bookedAt);
   });
   return (
-    <section className="surface-card transactions-page-card">
-      <div className="transaction-toolbar">
-        <label className="search-field"><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Pesquisar comerciante ou descrição" aria-label="Pesquisar movimentos" /></label>
-        <label className="select-field"><span>Categoria</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option>Todas</option>{CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label className="select-field"><span>Estado</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option>Todos</option><option value="booked">Contabilizados</option><option value="pending">Pendentes</option></select></label>
-        <button className="secondary-button" type="button" onClick={() => exportTransactionsCsv(filtered)}><Icon name="download" /> Exportar CSV</button>
-      </div>
-      <div className="result-summary"><strong>{filtered.length} {filtered.length === 1 ? "movimento" : "movimentos"}</strong><span>Os totais históricos usam apenas movimentos contabilizados.</span></div>
-      <TransactionTable transactions={filtered} accounts={data.accounts} onCategoryChange={onCategoryChange} busy={busy} />
-      {filtered.length === 0 && <EmptyState icon="search" title="Nenhum movimento encontrado" description="Altere os filtros ou a pesquisa para ver outros resultados." />}
-    </section>
+    <>
+      <section className="surface-card transactions-page-card">
+        <div className="transaction-actions"><div><p className="section-kicker">Núcleo financeiro</p><h2>Movimentos</h2></div><button className="secondary-button" type="button" onClick={onImport}><Icon name="upload" /> Importar CSV</button><button className="primary-button" type="button" onClick={onAddTransaction}><Icon name="plus" /> Novo movimento</button></div>
+        <div className="transaction-toolbar expanded">
+          <label className="search-field"><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Pesquisar comerciante ou descrição" aria-label="Pesquisar movimentos" /></label>
+          <label className="select-field"><span>Conta</span><select value={accountId} onChange={(event) => setAccountId(event.target.value)}><option>Todas</option>{data.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+          <label className="select-field"><span>Categoria</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option>Todas</option>{data.categories.map((item) => <option key={item.id}>{item.name}</option>)}</select></label>
+          <label className="select-field"><span>Estado</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option>Todos</option><option value="booked">Contabilizados</option><option value="pending">Pendentes</option></select></label>
+          <label className="select-field"><span>Ordenação</span><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="date-desc">Mais recentes</option><option value="date-asc">Mais antigos</option><option value="amount-desc">Maior montante</option><option value="amount-asc">Menor montante</option></select></label>
+          <button className="secondary-button" type="button" onClick={() => exportTransactionsCsv(filtered)}><Icon name="download" /> Exportar CSV</button>
+        </div>
+        <div className="result-summary"><strong>{filtered.length} {filtered.length === 1 ? "movimento" : "movimentos"}</strong><span>Os totais históricos usam apenas movimentos contabilizados.</span></div>
+        <TransactionTable transactions={filtered} accounts={data.accounts} categories={data.categories} onCategoryChange={onCategoryChange} busy={busy} />
+        {filtered.length === 0 && <EmptyState icon="search" title="Nenhum movimento encontrado" description="Altere os filtros ou a pesquisa para ver outros resultados." />}
+      </section>
+
+      <section className="financial-core-grid">
+        <article className="surface-card rules-card"><div className="section-heading"><div><p className="section-kicker">Automação explicável</p><h2>Regras de categorização</h2></div><button className="secondary-button" type="button" onClick={onAddRule}><Icon name="plus" /> Nova regra</button></div>{data.rules.length ? <div className="rules-list">{data.rules.map((rule) => <div className="rule-row" key={rule.id}><label className="rule-toggle"><input type="checkbox" checked={rule.isActive} disabled={busy} onChange={(event) => onToggleRule(rule.id, event.target.checked)} /><i /></label><span><strong>{rule.name}</strong><small>{rule.field === "merchant" ? "Comerciante" : "Descrição"} {rule.operator === "contains" ? "contém" : rule.operator === "equals" ? "é igual a" : "começa por"} “{rule.pattern}”</small></span><span className="category-pill">{rule.categoryName}</span><button className="danger-text-button" type="button" disabled={busy} onClick={() => onDeleteRule(rule.id)}>Eliminar</button></div>)}</div> : <EmptyState icon="settings" title="Ainda não existem regras" description="Crie uma regra transparente para classificar movimentos actuais e importações futuras." />}</article>
+        <article className="surface-card category-management"><div className="section-heading"><div><p className="section-kicker">Taxonomia</p><h2>Categorias</h2></div><button className="secondary-button" type="button" onClick={onAddCategory}><Icon name="plus" /> Categoria</button></div><div className="category-cloud">{data.categories.map((item) => <span className={`category-pill kind-${item.kind}`} key={item.id}>{item.name}{!item.isSystem && <small>Personalizada</small>}</span>)}</div><div className="import-history"><h3>Importações recentes</h3>{data.imports.length ? data.imports.map((item) => <div key={item.id}><span><strong>{item.fileName}</strong><small>{formatDate(item.createdAt, true)}</small></span><span><b>{item.importedRows}</b> importados · {item.duplicateRows} duplicados · {item.invalidRows} inválidos</span></div>) : <p>Nenhum ficheiro importado.</p>}</div></article>
+      </section>
+    </>
   );
 }
 
-function TransactionTable({ transactions, accounts, compact = false, onCategoryChange, busy }: { transactions: Transaction[]; accounts: Account[]; compact?: boolean; onCategoryChange?: (id: string, category: string) => void; busy?: boolean }) {
+function TransactionTable({ transactions, accounts, categories = [], compact = false, onCategoryChange, busy }: { transactions: Transaction[]; accounts: Account[]; categories?: Category[]; compact?: boolean; onCategoryChange?: (id: string, categoryId: string) => void; busy?: boolean }) {
   return (
     <div className={`table-scroll ${compact ? "compact-table" : ""}`}><table className="transaction-table"><thead><tr><th>Data</th><th>Movimento</th>{!compact && <th>Conta</th>}<th>Categoria</th><th>Estado</th><th className="amount-column">Montante</th></tr></thead><tbody>{transactions.map((transaction) => {
       const account = accounts.find((item) => item.id === transaction.accountId);
-      return <tr key={transaction.id}><td><span className="date-cell">{new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "short" }).format(new Date(transaction.bookedAt))}</span></td><td><span className={`merchant-icon category-${categorySlug(transaction.category)}`}>{transaction.merchant?.slice(0, 1).toUpperCase() ?? "€"}</span><span className="merchant-copy"><strong>{transaction.merchant ?? transaction.description}</strong><small>{transaction.isInternalTransfer ? "Transferência entre contas próprias" : transaction.description}</small></span></td>{!compact && <td><span className="account-cell">{account?.name ?? "Conta removida"}</span></td>}<td>{onCategoryChange && !transaction.isInternalTransfer ? <select className="category-select" value={transaction.category} disabled={busy} onChange={(event) => onCategoryChange(transaction.id, event.target.value)}>{CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select> : <span className="category-pill">{transaction.category}</span>}</td><td><span className={`status-pill ${transaction.status}`}>{transaction.status === "booked" ? "Contabilizado" : "Pendente"}</span></td><td className={`amount-cell ${transaction.amountCents >= 0 ? "positive" : transaction.isInternalTransfer ? "neutral" : "negative"}`}>{transaction.amountCents >= 0 ? "+" : ""}{formatMoney(transaction.amountCents)}</td></tr>;
+      const effectiveCategoryId = transaction.categoryId ?? categories.find((item) => item.name === transaction.category)?.id ?? "";
+      return <tr key={transaction.id}><td><span className="date-cell">{new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "short" }).format(new Date(`${transaction.bookedAt}T00:00:00`))}</span></td><td><span className={`merchant-icon category-${categorySlug(transaction.category)}`}>{transaction.merchant?.slice(0, 1).toUpperCase() ?? "€"}</span><span className="merchant-copy"><strong>{transaction.merchant ?? transaction.description}</strong><small>{transaction.isInternalTransfer ? "Transferência entre contas próprias" : transaction.description}</small>{!compact && transaction.categorySource && <em>{transaction.categorySource === "user" ? "Corrigida por si" : transaction.categorySource === "rule" ? "Regra ou classificação automática" : "Categoria original"}</em>}</span></td>{!compact && <td><span className="account-cell">{account?.name ?? "Conta removida"}</span></td>}<td>{onCategoryChange && !transaction.isInternalTransfer ? <select className="category-select" value={effectiveCategoryId} disabled={busy} onChange={(event) => onCategoryChange(transaction.id, event.target.value)}>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : <span className="category-pill">{transaction.category}</span>}</td><td><span className={`status-pill ${transaction.status}`}>{transaction.status === "booked" ? "Contabilizado" : "Pendente"}</span></td><td className={`amount-cell ${transaction.amountCents >= 0 ? "positive" : transaction.isInternalTransfer ? "neutral" : "negative"}`}>{transaction.amountCents >= 0 ? "+" : ""}{formatMoney(transaction.amountCents)}</td></tr>;
     })}</tbody></table></div>
   );
 }
@@ -489,8 +533,8 @@ function PlanningPage({ data, onAdd }: { data: FinanceState; onAdd: () => void }
 }
 
 function WealthPage({ data, metrics }: { data: FinanceState; metrics: Metrics }) {
-  const assetAccounts = data.accounts.filter((account) => account.balanceCents > 0);
-  const debtAccounts = data.accounts.filter((account) => account.balanceCents < 0);
+  const assetAccounts = data.accounts.filter((account) => !Boolean(account.isHidden) && account.balanceCents > 0);
+  const debtAccounts = data.accounts.filter((account) => !Boolean(account.isHidden) && account.balanceCents < 0);
   return (
     <>
       <section className="wealth-hero"><article className="surface-card"><span>Património líquido</span><strong>{formatMoney(metrics.netWorth)}</strong><small>Activos menos passivos em 10/07/2026</small></article><article className="surface-card positive-surface"><span>Total de activos</span><strong>{formatMoney(metrics.assets)}</strong><small>{assetAccounts.length} posições incluídas</small></article><article className="surface-card negative-surface"><span>Total de passivos</span><strong>{formatMoney(metrics.liabilities)}</strong><small>{debtAccounts.length} posição de dívida</small></article></section>
@@ -526,7 +570,7 @@ function NotificationPanel({ alerts, onDismiss }: { alerts: AlertItem[]; onDismi
   return <div className="notification-panel"><div><strong>Alertas</strong><span>{alerts.length} por rever</span></div>{alerts.length ? alerts.map((alert) => <article key={alert.id}><span className={`alert-symbol ${alert.tone}`}><Icon name={alert.tone === "success" ? "check" : alert.tone === "warning" ? "warning" : "info"} /></span><span><strong>{alert.title}</strong><small>{alert.detail}</small></span><button type="button" onClick={() => onDismiss(alert.id)} aria-label="Dispensar alerta"><Icon name="close" /></button></article>) : <p className="empty-notifications">Não existem alertas por rever.</p>}</div>;
 }
 
-function ModalLayer({ modal, data, selectedAccount, busy, onClose, onSubmit }: { modal: Exclude<Modal, null>; data: FinanceState; selectedAccount: Account | null; busy: boolean; onClose: () => void; onSubmit: (action: ActionPayload, message: string) => Promise<void> }) {
+function ModalLayer({ modal, data, selectedAccount, busy, onClose, onSubmit, onToggleAccountVisibility }: { modal: Exclude<Modal, null>; data: FinanceState; selectedAccount: Account | null; busy: boolean; onClose: () => void; onSubmit: (action: ActionPayload, message: string) => Promise<void>; onToggleAccountVisibility: (accountId: string, isHidden: boolean) => Promise<void> }) {
   function submitAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const balanceCents = moneyInputToCents(form.get("balance"));
     onSubmit({ type: "createAccount", name: String(form.get("name")), accountType: String(form.get("accountType")), balanceCents }, "Conta manual criada.");
@@ -543,20 +587,85 @@ function ModalLayer({ modal, data, selectedAccount, busy, onClose, onSubmit }: {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     onSubmit({ type: "connectMockBank", institutionId: String(form.get("institution")) }, "Banco de demonstração ligado e sincronizado.");
   }
+  function submitTransaction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    onSubmit({ type: "createManualTransaction", accountId: String(form.get("accountId")), description: String(form.get("description")), merchant: String(form.get("merchant")), amountCents: moneyInputToCents(form.get("amount")), categoryId: String(form.get("categoryId")), status: String(form.get("status")), bookedAt: String(form.get("bookedAt")), isInternalTransfer: form.get("isInternalTransfer") === "on" }, "Movimento manual criado.");
+  }
+  function submitRule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    onSubmit({ type: "createCategorizationRule", name: String(form.get("name")), field: String(form.get("field")), operator: String(form.get("operator")), pattern: String(form.get("pattern")), categoryId: String(form.get("categoryId")), priority: Number(form.get("priority")), applyToExisting: form.get("applyToExisting") === "on" }, "Regra criada e aplicada aos movimentos elegíveis.");
+  }
+  function submitCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    onSubmit({ type: "createCategory", name: String(form.get("name")), kind: String(form.get("kind")) }, "Categoria personalizada criada.");
+  }
 
   const accountTransactions = selectedAccount ? data.transactions.filter((transaction) => transaction.accountId === selectedAccount.id) : [];
-  const titles: Record<Exclude<Modal, null>, string> = { account: "Adicionar conta manual", bank: "Ligar instituição", budget: "Criar orçamento", goal: "Novo objectivo", accountDetails: selectedAccount?.name ?? "Detalhe da conta" };
+  const titles: Record<Exclude<Modal, null>, string> = { account: "Adicionar conta manual", bank: "Ligar instituição", budget: "Criar orçamento", goal: "Novo objectivo", accountDetails: selectedAccount?.name ?? "Detalhe da conta", transaction: "Adicionar movimento manual", csvImport: "Importar movimentos CSV", rule: "Nova regra de categorização", category: "Nova categoria" };
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-header"><div><p className="section-kicker">{modal === "bank" ? "Open Banking · Sandbox" : "Clareza"}</p><h2 id="modal-title">{titles[modal]}</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></div>
     {modal === "account" && <form className="modal-form" onSubmit={submitAccount}><label>Nome da conta<input name="name" required minLength={2} placeholder="Ex.: Conta poupança" /></label><label>Tipo<select name="accountType" defaultValue="checking"><option value="checking">Conta à ordem</option><option value="savings">Conta poupança</option><option value="credit">Cartão de crédito</option><option value="cash">Dinheiro</option><option value="investment">Investimento</option><option value="loan">Empréstimo</option></select></label><label>Saldo contabilístico<div className="money-field"><input name="balance" required inputMode="decimal" placeholder="0,00" /><span>EUR</span></div><small>Use um valor negativo para dívida ou crédito utilizado.</small></label><ModalActions busy={busy} onClose={onClose} submitLabel="Criar conta" /></form>}
-    {modal === "budget" && <form className="modal-form" onSubmit={submitBudget}><label>Categoria<select name="category" defaultValue="Supermercado">{CATEGORIES.filter((item) => item !== "Rendimentos").map((item) => <option key={item}>{item}</option>)}</select></label><label>Limite mensal<div className="money-field"><input name="limit" required inputMode="decimal" placeholder="300,00" /><span>EUR</span></div></label><div className="form-note"><Icon name="info" /> Se já existir um orçamento para esta categoria em Julho, o limite será actualizado.</div><ModalActions busy={busy} onClose={onClose} submitLabel="Guardar orçamento" /></form>}
+    {modal === "budget" && <form className="modal-form" onSubmit={submitBudget}><label>Categoria<select name="category" defaultValue="Supermercado">{data.categories.filter((item) => item.kind === "expense").map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label>Limite mensal<div className="money-field"><input name="limit" required inputMode="decimal" placeholder="300,00" /><span>EUR</span></div></label><div className="form-note"><Icon name="info" /> Se já existir um orçamento para esta categoria em Julho, o limite será actualizado.</div><ModalActions busy={busy} onClose={onClose} submitLabel="Guardar orçamento" /></form>}
     {modal === "goal" && <form className="modal-form" onSubmit={submitGoal}><label>Nome do objectivo<input name="name" required placeholder="Ex.: Entrada para habitação" /></label><div className="form-row"><label>Montante-alvo<div className="money-field"><input name="target" required inputMode="decimal" placeholder="10 000,00" /><span>EUR</span></div></label><label>Já acumulado<div className="money-field"><input name="current" required inputMode="decimal" defaultValue="0,00" /><span>EUR</span></div></label></div><label>Data-alvo<input type="date" name="targetDate" min="2026-07-11" /></label><ModalActions busy={busy} onClose={onClose} submitLabel="Criar objectivo" /></form>}
     {modal === "bank" && <form className="modal-form" onSubmit={submitBank}><div className="sandbox-banner"><Icon name="shield" /><span><strong>Ambiente sandbox</strong> O fluxo abaixo não contacta um banco real nem solicita credenciais.</span></div><label>País<select name="country" defaultValue="PT"><option value="PT">Portugal</option></select></label><fieldset className="institution-options"><legend>Instituição</legend>{[["pt-demo-atlantico", "Banco Atlântico", "Sandbox português"], ["pt-demo-lusitano", "Banco Lusitano", "Sandbox português"]].map(([id, name, detail], index) => <label key={id}><input type="radio" name="institution" value={id} defaultChecked={index === 0} /><span className="institution-logo"><Icon name="bank" /></span><span><strong>{name}</strong><small>{detail}</small></span><Icon name="arrow" /></label>)}</fieldset><p className="consent-copy">Ao continuar, será simulada a autorização read-only e a primeira sincronização de contas, saldos e movimentos.</p><ModalActions busy={busy} onClose={onClose} submitLabel="Continuar no sandbox" /></form>}
-    {modal === "accountDetails" && selectedAccount && <div className="account-detail"><div className="account-detail-balance"><span>Saldo contabilístico</span><strong>{formatMoney(selectedAccount.balanceCents)}</strong><small>Disponível: {formatMoney(selectedAccount.availableBalanceCents ?? selectedAccount.balanceCents)}</small></div><dl><div><dt>Origem</dt><dd>{selectedAccount.source === "synced" ? "Sincronização bancária" : "Introdução manual"}</dd></div><div><dt>Instituição</dt><dd>{selectedAccount.institutionName ?? "—"}</dd></div><div><dt>Moeda</dt><dd>{selectedAccount.currency}</dd></div><div><dt>Movimentos</dt><dd>{accountTransactions.length}</dd></div></dl><h3>Movimentos desta conta</h3>{accountTransactions.length ? <TransactionTable transactions={accountTransactions.slice(0, 4)} accounts={data.accounts} compact /> : <EmptyState icon="transactions" title="Sem movimentos" description="Esta conta ainda não possui movimentos associados." />}<button className="primary-button full-width" type="button" onClick={onClose}>Fechar</button></div>}
+    {modal === "transaction" && <form className="modal-form" onSubmit={submitTransaction}><label>Conta<select name="accountId">{data.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label><div className="form-row"><label>Data<input name="bookedAt" type="date" required defaultValue="2026-07-10" /></label><label>Estado<select name="status" defaultValue="booked"><option value="booked">Contabilizado</option><option value="pending">Pendente</option></select></label></div><label>Descrição<input name="description" required maxLength={160} placeholder="Ex.: Compra de supermercado" /></label><label>Comerciante<input name="merchant" maxLength={160} placeholder="Opcional" /></label><div className="form-row"><label>Montante<div className="money-field"><input name="amount" required inputMode="decimal" placeholder="-42,50" /><span>EUR</span></div><small>Use um valor negativo para uma saída.</small></label><label>Categoria<select name="categoryId">{data.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><label className="checkbox-row"><input name="isInternalTransfer" type="checkbox" /><span><strong>Transferência entre contas próprias</strong><small>Fica excluída das despesas de consumo.</small></span></label><ModalActions busy={busy} onClose={onClose} submitLabel="Criar movimento" /></form>}
+    {modal === "rule" && <form className="modal-form" onSubmit={submitRule}><label>Nome da regra<input name="name" required placeholder="Ex.: Compras no Continente" /></label><div className="form-row"><label>Campo<select name="field" defaultValue="merchant"><option value="merchant">Comerciante</option><option value="description">Descrição</option></select></label><label>Condição<select name="operator" defaultValue="contains"><option value="contains">Contém</option><option value="equals">É igual a</option><option value="starts_with">Começa por</option></select></label></div><label>Texto a procurar<input name="pattern" required placeholder="Ex.: CONTINENTE" /></label><div className="form-row"><label>Categoria<select name="categoryId">{data.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Prioridade<input name="priority" type="number" min="0" max="100" defaultValue="50" required /></label></div><label className="checkbox-row"><input name="applyToExisting" type="checkbox" defaultChecked /><span><strong>Aplicar a movimentos existentes</strong><small>As correcções manuais do utilizador nunca são substituídas.</small></span></label><ModalActions busy={busy} onClose={onClose} submitLabel="Criar regra" /></form>}
+    {modal === "category" && <form className="modal-form" onSubmit={submitCategory}><label>Nome da categoria<input name="name" required maxLength={80} placeholder="Ex.: Animais de estimação" /></label><label>Tipo<select name="kind" defaultValue="expense"><option value="expense">Despesa</option><option value="income">Rendimento</option><option value="transfer">Transferência</option></select></label><div className="form-note"><Icon name="info" /> A categoria ficará disponível nos movimentos, regras e orçamentos compatíveis.</div><ModalActions busy={busy} onClose={onClose} submitLabel="Criar categoria" /></form>}
+    {modal === "csvImport" && <CsvImportForm data={data} busy={busy} onClose={onClose} onSubmit={onSubmit} />}
+    {modal === "accountDetails" && selectedAccount && <div className="account-detail"><div className="account-detail-balance"><span>Saldo contabilístico</span><strong>{formatMoney(selectedAccount.balanceCents)}</strong><small>Disponível: {formatMoney(selectedAccount.availableBalanceCents ?? selectedAccount.balanceCents)}</small></div><dl><div><dt>Origem</dt><dd>{selectedAccount.source === "synced" ? "Sincronização bancária" : selectedAccount.source === "imported" ? "Importação" : "Introdução manual"}</dd></div><div><dt>Instituição</dt><dd>{selectedAccount.institutionName ?? "—"}</dd></div><div><dt>Moeda</dt><dd>{selectedAccount.currency}</dd></div><div><dt>Movimentos</dt><dd>{accountTransactions.length}</dd></div></dl><h3>Movimentos desta conta</h3>{accountTransactions.length ? <TransactionTable transactions={accountTransactions.slice(0, 4)} accounts={data.accounts} compact /> : <EmptyState icon="transactions" title="Sem movimentos" description="Esta conta ainda não possui movimentos associados." />}<div className="account-detail-actions"><button className="secondary-button" disabled={busy} type="button" onClick={() => onToggleAccountVisibility(selectedAccount.id, !Boolean(selectedAccount.isHidden))}>{selectedAccount.isHidden ? "Incluir nos totais" : "Ocultar dos totais"}</button><button className="primary-button" type="button" onClick={onClose}>Fechar</button></div></div>}
   </section></div>;
 }
 
-function ModalActions({ busy, onClose, submitLabel }: { busy: boolean; onClose: () => void; submitLabel: string }) {
-  return <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={busy}>{busy ? <><span className="spinner" /> A guardar…</> : submitLabel}</button></div>;
+function CsvImportForm({ data, busy, onClose, onSubmit }: { data: FinanceState; busy: boolean; onClose: () => void; onSubmit: (action: ActionPayload, message: string) => Promise<void> }) {
+  const [fileName, setFileName] = useState("");
+  const [content, setContent] = useState("");
+  const [parsed, setParsed] = useState<ParsedCsv | null>(null);
+  const [mapping, setMapping] = useState<CsvColumnMapping>({ date: "", description: "", amount: "", merchant: "", category: "", status: "" });
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  async function selectFile(file?: File) {
+    setFileError(null);
+    setParsed(null);
+    if (!file) return;
+    if (file.size > 2_000_000) {
+      setFileError("O ficheiro excede o limite de 2 MB desta demonstração.");
+      return;
+    }
+    try {
+      const nextContent = await file.text();
+      const nextParsed = parseCsvText(nextContent);
+      setFileName(file.name);
+      setContent(nextContent);
+      setParsed(nextParsed);
+      setMapping(suggestCsvColumnMapping(nextParsed.headers));
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : "Não foi possível ler o ficheiro CSV.");
+    }
+  }
+
+  function updateMapping(field: keyof CsvColumnMapping, value: string) {
+    setMapping((current) => ({ ...current, [field]: value }));
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!parsed || !fileName) return;
+    onSubmit({ type: "importTransactionsCsv", accountId: String(new FormData(event.currentTarget).get("accountId")), fileName, content, delimiter: parsed.delimiter, mapping }, "Importação concluída; duplicados e linhas inválidas foram contabilizados separadamente.");
+  }
+
+  const selector = (field: keyof CsvColumnMapping, label: string, required = false) => <label>{label}<select value={mapping[field] ?? ""} required={required} onChange={(event) => updateMapping(field, event.target.value)}><option value="">{required ? "Seleccionar coluna" : "Não importar"}</option>{parsed?.headers.map((header) => <option key={header} value={header}>{header}</option>)}</select></label>;
+
+  return <form className="modal-form csv-import-form" onSubmit={submit}>
+    <div className="form-note"><Icon name="info" /> O ficheiro é validado no servidor. Montantes ficam guardados em cêntimos e uma impressão digital impede a importação repetida da mesma linha.</div>
+    <label>Conta de destino<select name="accountId">{data.accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></label>
+    <label className="file-drop"><input type="file" accept=".csv,text/csv" onChange={(event) => selectFile(event.target.files?.[0])} /><Icon name="upload" /><span><strong>{fileName || "Escolher ficheiro CSV"}</strong><small>Até 2 MB · separadores vírgula, ponto e vírgula ou tabulação</small></span></label>
+    {fileError && <div className="inline-form-error" role="alert">{fileError}</div>}
+    {parsed && <><div className="csv-summary"><span><strong>{parsed.rows.length}</strong> linhas detectadas</span><span><strong>{parsed.headers.length}</strong> colunas</span><span><strong>{parsed.delimiter === "\t" ? "Tabulação" : parsed.delimiter}</strong> separador</span></div><div className="csv-mapping"><h3>Mapeamento de colunas</h3><div className="form-row">{selector("date", "Data", true)}{selector("amount", "Montante", true)}</div>{selector("description", "Descrição", true)}<div className="form-row">{selector("merchant", "Comerciante")}{selector("category", "Categoria")}</div>{selector("status", "Estado")}</div><div className="csv-preview"><h3>Pré-visualização</h3><div className="table-scroll"><table><thead><tr>{parsed.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{parsed.rows.slice(0, 3).map((row, index) => <tr key={index}>{parsed.headers.map((header) => <td key={header}>{row[header] || "—"}</td>)}</tr>)}</tbody></table></div></div></>}
+    <ModalActions busy={busy} disabled={!parsed} onClose={onClose} submitLabel="Importar movimentos" />
+  </form>;
+}
+
+function ModalActions({ busy, disabled = false, onClose, submitLabel }: { busy: boolean; disabled?: boolean; onClose: () => void; submitLabel: string }) {
+  return <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={busy || disabled}>{busy ? <><span className="spinner" /> A guardar…</> : submitLabel}</button></div>;
 }
 
 function EmptyState({ icon, title, description }: { icon: IconName; title: string; description: string }) {
@@ -566,7 +675,11 @@ function EmptyState({ icon, title, description }: { icon: IconName; title: strin
 function exportTransactionsCsv(transactions: Transaction[]) {
   const header = ["Data", "Descrição", "Comerciante", "Categoria", "Estado", "Montante", "Moeda"];
   const rows = transactions.map((transaction) => [transaction.bookedAt, transaction.description, transaction.merchant ?? "", transaction.category, transaction.status, (transaction.amountCents / 100).toFixed(2), transaction.currency]);
-  const csv = [header, ...rows].map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(";")).join("\n");
+  const csv = [header, ...rows].map((row) => row.map((cell) => {
+    const value = String(cell);
+    const safeValue = /^[=+@]/.test(value) || (/^-/.test(value) && !/^-\d+(?:\.\d+)?$/.test(value)) ? `'${value}` : value;
+    return `"${safeValue.replaceAll('"', '""')}"`;
+  }).join(";")).join("\n");
   const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob); const anchor = document.createElement("a");
   anchor.href = url; anchor.download = "clareza-movimentos-julho-2026.csv"; anchor.click(); URL.revokeObjectURL(url);
@@ -576,7 +689,7 @@ function categorySlug(category: string) {
   return category.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
 }
 
-type IconName = "overview" | "wallet" | "transactions" | "budget" | "target" | "wealth" | "report" | "settings" | "sun" | "bell" | "plus" | "arrow" | "shield" | "chevrons" | "trendUp" | "trendDown" | "spark" | "pie" | "warning" | "info" | "close" | "check" | "link" | "bank" | "card" | "cash" | "search" | "download" | "calendar" | "user";
+type IconName = "overview" | "wallet" | "transactions" | "budget" | "target" | "wealth" | "report" | "settings" | "sun" | "bell" | "plus" | "arrow" | "shield" | "chevrons" | "trendUp" | "trendDown" | "spark" | "pie" | "warning" | "info" | "close" | "check" | "link" | "bank" | "card" | "cash" | "search" | "download" | "upload" | "calendar" | "user";
 
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, ReactNode> = {
@@ -598,7 +711,7 @@ function Icon({ name }: { name: IconName }) {
     info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></>, close: <><path d="M18 6 6 18M6 6l12 12"/></>, check: <><path d="m5 12 4 4L19 6"/></>,
     link: <><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1.1"/></>,
     bank: <><path d="m3 9 9-6 9 6M5 10v8M9 10v8M15 10v8M19 10v8M3 21h18"/></>, card: <><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></>, cash: <><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 10v4M18 10v4"/></>,
-    search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>, download: <><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></>, calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></>, user: <><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></>,
+    search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>, download: <><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></>, upload: <><path d="M12 16V4M7 9l5-5 5 5M5 21h14"/></>, calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></>, user: <><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></>,
   };
   return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }

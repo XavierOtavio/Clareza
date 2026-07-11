@@ -7,10 +7,12 @@ The interface explicitly identifies fictitious demonstration data. The mock Open
 ## Included functionality
 
 - Dashboard with booked, available, pending, asset, liability, cash-flow, and net-worth values kept separate.
-- Supabase-backed accounts, transactions, budgets, goals, bank connection metadata, and audit events.
-- Manual account creation and account detail views.
+- Supabase-backed accounts, transactions, categories, categorization rules, import jobs, budgets, goals, bank connection metadata, and audit events.
+- Manual account and transaction creation, account detail views, and the option to exclude an account from financial totals.
 - Labelled mock bank connection with idempotent transaction import behind `BankDataProvider`.
-- Transaction search, filters, CSV export, and persisted category corrections.
+- Transaction search, account/category/status filters, sorting, CSV import/export, and persisted category corrections stored separately from source data.
+- Configurable, prioritized categorization rules that respect user corrections and apply to existing and newly imported transactions.
+- CSV column mapping, Portuguese and ISO dates, decimal validation, partial-error reporting, and idempotent duplicate detection.
 - Budget and goal flows, forecasting assumptions, report printing, and demonstration reset.
 - Responsive PWA shell, light/dark themes, keyboard focus, reduced-motion support, accessible chart labels, and tabular alternatives.
 - Integer minor-unit money storage and deterministic financial calculation tests.
@@ -35,7 +37,7 @@ Requirements: Node.js 22.13 or newer, npm, and a Supabase project.
    cp .env.example .env.local
    ```
 
-2. In Supabase, run `supabase/migrations/202607100001_clareza_foundation.sql` using the SQL editor. If the Supabase CLI is linked to the project, `supabase db push` is an equivalent option.
+2. In Supabase, run every file in `supabase/migrations/` in filename order using the SQL editor. If the Supabase CLI is linked to the project, `supabase db push` is the preferred equivalent.
 
 3. Fill at least these server variables in `.env.local`:
 
@@ -60,6 +62,12 @@ npm run verify
 ```
 
 `verify` performs the strict TypeScript check, unit/configuration tests, and a production Next.js build.
+
+## CSV import
+
+Open **Movimentos → Importar CSV**, choose an existing account, and map the file columns. Data, description, and amount are mandatory. The importer accepts semicolon, comma, or tab delimiters; quoted fields; `DD/MM/YYYY` or `YYYY-MM-DD` dates; and Portuguese or dot-decimal amounts.
+
+Each accepted row receives a SHA-256 fingerprint derived from account, date, amount, and normalized description. Re-importing the same file therefore reports duplicates instead of inserting them again. Invalid rows are reported separately and do not prevent valid rows from being imported.
 
 ## Environment variables
 

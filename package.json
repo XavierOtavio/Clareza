@@ -9,7 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --test tests/finance-calculations.test.ts tests/vercel-configuration.test.ts",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:unit": "node --experimental-strip-types --test tests/finance-calculations.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -19,7 +19,8 @@
     "@supabase/supabase-js": "^2.57.4",
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.2.1",

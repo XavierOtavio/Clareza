@@ -6,7 +6,12 @@ The repository uses the standard Next.js lifecycle and no longer depends on Clou
 
 Use separate Supabase projects for preview and production when real data is introduced.
 
-Run `supabase/migrations/202607100001_clareza_foundation.sql` in the Supabase SQL editor. Alternatively, link the Supabase CLI and run:
+Run all SQL files in `supabase/migrations/` in filename order in the Supabase SQL editor. The current order is:
+
+1. `202607100001_clareza_foundation.sql`
+2. `202607110001_financial_core.sql`
+
+Alternatively, link the Supabase CLI and run:
 
 ```bash
 supabase db push
@@ -55,6 +60,10 @@ Deploy from Vercel, then verify:
 - `/` loads with the **Demonstração** label;
 - `/api/finance` returns HTTP 200 after Supabase is configured;
 - a manual account persists after a refresh;
+- manual accounts and movements persist, and hidden accounts leave the dashboard totals;
+- category corrections persist without changing normalized transaction fields;
+- rules apply according to priority and do not overwrite user corrections;
+- a CSV import reports imported, duplicate, and invalid rows separately;
 - category, budget, and goal changes persist;
 - the mock bank connection imports data without duplicate provider transactions;
 - CSV export and report printing work;
