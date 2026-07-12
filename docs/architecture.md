@@ -13,6 +13,7 @@ Clareza is a standard Next.js App Router application deployed through Vercel. Re
 5. PostgreSQL constraints, indexes, foreign keys, integer-cent fields, and RLS policies establish the first persistence boundary.
 6. `BankDataProvider` isolates the application from an AISP. Only `MockBankDataProvider`, which returns fictitious data, is active.
 7. Pure functions in `lib/finance/calculations.ts` calculate balances, cash flow, savings, savings rate, pending values, category totals, and net worth.
+8. The `lib/transactions` domain parses and normalizes CSV files, creates stable duplicate fingerprints, validates API actions with Zod, and evaluates categorization rules independently of React and Supabase.
 
 ## Critical flows
 
@@ -24,13 +25,27 @@ The first API request creates the fixed demonstration workspace and idempotently
 
 The client converts a validated Portuguese decimal input to integer cents. The API validates safe integers, inserts the account within the fixed demonstration workspace, and writes an audit event.
 
+An account may be hidden from totals without deleting it. The flag affects assets, liabilities, available balance, and net worth while preserving the account and its movements.
+
+### Manual transaction
+
+The user chooses an account, date, state, category, and amount. The shared schema rejects invalid identifiers, unsafe monetary integers, and invalid ISO dates. Internal transfers remain explicit and are excluded from consumption metrics.
+
+### CSV import
+
+The client reads the selected file only to propose a column mapping and preview three rows. The server repeats parsing and validation, records an `import_job`, normalizes valid rows, applies the highest-priority active rule, and inserts only unseen fingerprints. Invalid and duplicate rows are counted separately. The application does not treat an inferred transfer as confirmed.
+
+### Categorization rules
+
+Rules target either merchant or description and support contains, equality, and starts-with operators. Matching is case-insensitive and accent-insensitive. Re-evaluation uses explicit priority and never overwrites a transaction with a user-authored category overlay.
+
 ### Mock bank connection
 
 The user selects a fictitious institution. The provider contract returns accounts and transactions. Stable provider transaction identifiers and a unique database constraint make repeated imports idempotent.
 
 ### Category correction
 
-The API updates the selected transaction only inside the workspace and records the correction. A production schema must preserve original provider data and user overlays separately.
+The API writes category corrections to `transaction_user_edits` rather than changing normalized source fields. The effective category is resolved when state is loaded, and every correction increments its version and creates an audit event.
 
 ### Financial summary
 
@@ -41,12 +56,16 @@ Only booked, non-internal transactions enter income and consumption totals. Pend
 - `workspaces` and `workspace_members`: ownership and access boundary.
 - `accounts`: manual, imported, or synchronised financial accounts.
 - `transactions`: booked or pending entries with stable provider identifiers.
+- `categories`: workspace-owned system and custom categories.
+- `categorization_rules`: transparent prioritized matching rules.
+- `transaction_user_edits`: versioned user overlays separated from normalized source data.
+- `import_jobs`: source file metadata, mapping, status, and row outcome counts.
 - `budgets`: category limit per workspace and month.
 - `goals`: target, progress, date, and priority.
 - `bank_connections`: non-secret provider and consent lifecycle metadata.
 - `audit_events`: server-side mutation history.
 
-The production model must add consent/token envelopes, balance snapshots, splits, merchants, tags, rules, recurring items, debts, investments, documents, notifications, imports, synchronisation jobs, and immutable audit detail.
+The production model must add consent/token envelopes, balance snapshots, splits, normalized merchants, tags, recurring items, debts, investments, documents, notifications, synchronisation jobs, and immutable audit detail.
 
 ## Security posture
 
