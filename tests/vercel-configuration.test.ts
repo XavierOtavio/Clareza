@@ -35,7 +35,7 @@ test("declares Vercel and Supabase deployment assets", () => {
 
   assert.equal(vercel.framework, "nextjs");
   assert.deepEqual(vercel.regions, ["fra1"]);
-  assert.deepEqual(vercel.crons, [{ path: "/api/banking/sync", schedule: "0 */6 * * *" }]);
+  assert.deepEqual(vercel.crons, [{ path: "/api/banking/sync", schedule: "0 4 * * *" }]);
   assert.match(read("supabase/migrations/202607100001_clareza_foundation.sql"), /enable row level security/i);
   const financialCoreMigration = read("supabase/migrations/202607110001_financial_core.sql");
   assert.match(financialCoreMigration, /transactions_import_fingerprint_unique/i);

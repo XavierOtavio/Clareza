@@ -3,6 +3,6 @@
   "framework": "nextjs",
   "regions": ["fra1"],
   "crons": [
-    { "path": "/api/banking/sync", "schedule": "0 */6 * * *" }
+    { "path": "/api/banking/sync", "schedule": "0 4 * * *" }
   ]
 }

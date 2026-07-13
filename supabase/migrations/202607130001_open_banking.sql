@@ -27,7 +27,7 @@ set provider_connection_id = 'mock-' || institution_id
 where provider = 'mock' and provider_connection_id is null;
 
 update public.bank_connections
-set next_sync_at = coalesce(last_synced_at + interval '6 hours', now())
+set next_sync_at = coalesce(last_synced_at + interval '24 hours', now())
 where status = 'connected' and next_sync_at is null;
 
 create table public.financial_institutions (

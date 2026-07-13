@@ -55,7 +55,7 @@ ENABLE_BANKING_API_URL=https://api.enablebanking.com
 
 Never use a `NEXT_PUBLIC_` prefix for the Supabase service-role key or banking secrets.
 
-Create a distinct Enable Banking sandbox application and RSA key pair for Preview. Upload its self-signed certificate in the Enable Banking control panel and store only the application ID and private key in Vercel. `NEXT_PUBLIC_APP_URL` must be the exact HTTPS origin that receives `/api/banking/callback`. Each Vercel preview has a different origin, so use a stable protected preview domain or configure the matching callback origin for that environment. Vercel invokes `/api/banking/sync` every six hours and supplies `CRON_SECRET` as a bearer token.
+Create a distinct Enable Banking sandbox application and RSA key pair for Preview. Upload its self-signed certificate in the Enable Banking control panel and store only the application ID and private key in Vercel. `NEXT_PUBLIC_APP_URL` must be the exact HTTPS origin that receives `/api/banking/callback`. Each Vercel preview has a different origin, so use a stable protected preview domain or configure the matching callback origin for that environment. Vercel invokes `/api/banking/sync` daily at 04:00 UTC and supplies `CRON_SECRET` as a bearer token. This daily cadence is compatible with Vercel Hobby; more frequent production schedules require a suitable Vercel plan and an intentional update to both the cron and sync interval.
 
 ## 4. Deploy and smoke-test
 

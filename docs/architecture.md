@@ -47,7 +47,7 @@ In `mock` mode the same service completes immediately with fictitious data. In `
 
 ### Synchronisation and reconciliation
 
-Callback, manual, and six-hour scheduled jobs pass through the same idempotent service. Each job records its trigger, idempotency key and outcome. The service refreshes account balances, writes timestamped snapshots, looks back seven days from the previous successful sync, follows all Enable Banking transaction continuation keys with a bounded safety limit, and upserts provider transactions by stable identifiers.
+Callback, manual, and daily scheduled jobs pass through the same idempotent service. Each job records its trigger, idempotency key and outcome. The service refreshes account balances, writes timestamped snapshots, looks back seven days from the previous successful sync, follows all Enable Banking transaction continuation keys with a bounded safety limit, and upserts provider transactions by stable identifiers. The daily schedule is the deployable Vercel Hobby baseline; production may use a shorter cadence on an appropriate plan.
 
 Booked movements replace matching pending rows by explicit provider reference or, when absent, by a conservative account/amount/currency/description/date match. This preserves the local transaction identifier and any user overlay. Transient provider errors use exponential backoff and a small in-process circuit breaker; one unavailable institution does not block the finance API.
 

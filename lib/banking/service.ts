@@ -8,7 +8,7 @@ import { buildCallbackUrl, callbackStateIsUsable, createCallbackState, hashCallb
 import { BankProviderError } from "./resilience";
 
 export const DEMO_WORKSPACE_ID = "demo-workspace";
-const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 type Row = Record<string, unknown>;
 
