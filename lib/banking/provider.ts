@@ -20,7 +20,7 @@ export interface ProviderConnection {
   status: ConnectionStatus;
   redirectUrl?: string;
   consentExpiresAt?: string;
-  agreementId?: string;
+  consentId?: string;
   rawStatus?: string;
 }
 
@@ -55,7 +55,7 @@ export interface BankDataProvider {
   fetchAccounts(connectionId: string): Promise<ProviderAccount[]>;
   fetchBalances(connectionId: string, accountIds: string[]): Promise<ProviderAccount[]>;
   fetchTransactions(connectionId: string, since?: string): Promise<ProviderTransaction[]>;
-  refreshConnection(connectionId: string, redirectUri?: string, state?: string): Promise<ProviderConnection>;
+  refreshConnection(connectionId: string, redirectUri?: string, state?: string, institutionId?: string): Promise<ProviderConnection>;
   revokeConsent(connectionId: string): Promise<void>;
 }
 
@@ -64,12 +64,6 @@ const DEMO_INSTITUTIONS: BankInstitution[] = [
   { id: "pt-demo-lusitano", name: "Banco Lusitano — Sandbox", country: "PT" },
   { id: "es-demo-sol", name: "Banco del Sol — Sandbox", country: "ES" },
 ];
-
-export const SANDBOX_FINANCE_INSTITUTION: BankInstitution = {
-  id: "SANDBOXFINANCE_SFIN0000",
-  name: "Sandbox Finance — GoCardless",
-  country: "PT",
-};
 
 export class MockBankDataProvider implements BankDataProvider {
   async listInstitutions(country: string) {

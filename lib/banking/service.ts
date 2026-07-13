@@ -89,7 +89,7 @@ export async function startBankConnection(input: { country: string; institutionI
 
   const { error: consentError } = await supabase.from("consents").insert({
     id: id("consent"), workspace_id: DEMO_WORKSPACE_ID, bank_connection_id: connectionId,
-    provider_agreement_id: connection.agreementId ?? null,
+    provider_consent_id: connection.consentId ?? null,
     status: connection.status === "connected" ? "active" : "pending",
     granted_at: connection.status === "connected" ? now.toISOString() : null,
     expires_at: connection.consentExpiresAt ?? null,
@@ -175,7 +175,7 @@ export async function synchronizeBankConnection(connectionId: string, trigger: "
   fail(syncingError, "Could not mark the bank connection as synchronizing");
 
   try {
-    const provider = createBankDataProvider(String(connection.provider) === "gocardless" ? "gocardless" : "mock");
+    const provider = createBankDataProvider(String(connection.provider) === "enablebanking" ? "enablebanking" : "mock");
     const accounts = await provider.fetchAccounts(String(connection.provider_connection_id));
     const { providerToLocal, capturedAt } = await upsertProviderAccounts(connection, accounts);
     const since = connection.last_synced_at ? new Date(new Date(String(connection.last_synced_at)).getTime() - 7 * 86_400_000).toISOString() : undefined;
@@ -248,16 +248,20 @@ export async function completeBankCallback(input: { connectionId: string; state:
     usedAt: connection.callback_state_used_at ? String(connection.callback_state_used_at) : null,
   })) throw new BankProviderError("The Open Banking callback state is invalid, expired, or already used.", 400, false, "invalid_state");
   input.params.set("providerConnectionId", String(connection.provider_connection_id));
-  const provider = createBankDataProvider(String(connection.provider) === "gocardless" ? "gocardless" : "mock");
+  const provider = createBankDataProvider(String(connection.provider) === "enablebanking" ? "enablebanking" : "mock");
   const result = await provider.handleCallback(input.params);
   const now = new Date().toISOString();
   const { error: updateError } = await supabase.from("bank_connections").update({
-    status: result.status, callback_state_used_at: now, institution_name: result.institutionName,
+    provider_connection_id: result.id, status: result.status, callback_state_used_at: now, institution_name: result.institutionName,
+    consent_expires_at: result.consentExpiresAt ?? connection.consent_expires_at ?? null,
     error_code: result.status === "error" ? result.rawStatus ?? "provider_rejected" : null,
   }).eq("id", input.connectionId);
   fail(updateError, "Could not finalize the bank callback");
   if (result.status !== "connected") throw new BankProviderError("The bank did not complete the account consent.", 409, false, result.rawStatus);
-  const { error: consentError } = await supabase.from("consents").update({ status: "active", granted_at: now }).eq("bank_connection_id", input.connectionId).eq("status", "pending");
+  const { error: consentError } = await supabase.from("consents").update({
+    provider_consent_id: result.consentId ?? null, status: "active", granted_at: now,
+    expires_at: result.consentExpiresAt ?? connection.consent_expires_at ?? null,
+  }).eq("bank_connection_id", input.connectionId).eq("status", "pending");
   fail(consentError, "Could not activate the consent metadata");
   await synchronizeBankConnection(input.connectionId, "callback", `callback:${result.id}`);
   await audit("bank.connected", input.connectionId, { provider: connection.provider });
@@ -270,15 +274,15 @@ export async function renewBankConnection(connectionId: string, appOrigin: strin
   const connection = data as Row;
   const state = createCallbackState();
   const callback = buildCallbackUrl(appOrigin, connectionId);
-  const provider = createBankDataProvider(String(connection.provider) === "gocardless" ? "gocardless" : "mock");
-  const renewed = await provider.refreshConnection(String(connection.provider_connection_id), callback, state);
+  const provider = createBankDataProvider(String(connection.provider) === "enablebanking" ? "enablebanking" : "mock");
+  const renewed = await provider.refreshConnection(String(connection.provider_connection_id), callback, state, String(connection.institution_id));
   const { error: updateError } = await supabase.from("bank_connections").update({
     provider_connection_id: renewed.id, status: renewed.status, callback_state_hash: hashCallbackState(state),
     callback_state_expires_at: new Date(Date.now() + 15 * 60_000).toISOString(), callback_state_used_at: renewed.status === "connected" ? new Date().toISOString() : null,
     consent_expires_at: renewed.consentExpiresAt ?? null, error_code: null, error_message: null,
   }).eq("id", connectionId);
   fail(updateError, "Could not save the renewed connection");
-  const { error: consentError } = await supabase.from("consents").insert({ id: id("consent"), workspace_id: DEMO_WORKSPACE_ID, bank_connection_id: connectionId, provider_agreement_id: renewed.agreementId ?? null, status: renewed.status === "connected" ? "active" : "pending", granted_at: renewed.status === "connected" ? new Date().toISOString() : null, expires_at: renewed.consentExpiresAt ?? null });
+  const { error: consentError } = await supabase.from("consents").insert({ id: id("consent"), workspace_id: DEMO_WORKSPACE_ID, bank_connection_id: connectionId, provider_consent_id: renewed.consentId ?? null, status: renewed.status === "connected" ? "active" : "pending", granted_at: renewed.status === "connected" ? new Date().toISOString() : null, expires_at: renewed.consentExpiresAt ?? null });
   fail(consentError, "Could not save the renewed consent metadata");
   await audit("bank.consent_renewal_started", connectionId);
   if (renewed.status === "connected") await synchronizeBankConnection(connectionId, "manual", `renew:${renewed.id}`);
@@ -291,8 +295,8 @@ export async function revokeBankConnection(connectionId: string) {
   fail(error, "Could not load the bank connection");
   if (!data) throw new Error("The bank connection was not found.");
   const connection = data as Row;
-  if (connection.status !== "revoked") {
-    const provider = createBankDataProvider(connection.provider === "gocardless" ? "gocardless" : "mock");
+  if (connection.status !== "revoked" && connection.status !== "requires_action") {
+    const provider = createBankDataProvider(connection.provider === "enablebanking" ? "enablebanking" : "mock");
     await provider.revokeConsent(String(connection.provider_connection_id));
   }
   const now = new Date().toISOString();

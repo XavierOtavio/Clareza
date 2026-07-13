@@ -42,20 +42,20 @@ BANK_DATA_PROVIDER=mock
 CRON_SECRET=generate-a-long-random-value
 ```
 
-For the real provider API with fictitious Sandbox Finance data, use:
+For the real Enable Banking API with sandbox institutions, use:
 
 ```text
-BANK_DATA_PROVIDER=gocardless
+BANK_DATA_PROVIDER=enablebanking
 BANK_DATA_ENVIRONMENT=sandbox
 BANK_DATA_ACCESS_VALID_DAYS=90
-BANK_DATA_HISTORY_DAYS=90
-GOCARDLESS_BANK_ACCOUNT_DATA_SECRET_ID=your-sandbox-secret-id
-GOCARDLESS_BANK_ACCOUNT_DATA_SECRET_KEY=your-sandbox-secret-key
+ENABLE_BANKING_APPLICATION_ID=your-sandbox-application-id
+ENABLE_BANKING_PRIVATE_KEY=your-pkcs8-rsa-private-key-with-escaped-newlines
+ENABLE_BANKING_API_URL=https://api.enablebanking.com
 ```
 
 Never use a `NEXT_PUBLIC_` prefix for the Supabase service-role key or banking secrets.
 
-`NEXT_PUBLIC_APP_URL` must be the exact HTTPS origin that receives `/api/banking/callback`. Each Vercel preview has a different origin, so either configure a stable protected preview domain or set separate credentials/origins per environment. Vercel invokes `/api/banking/sync` every six hours and supplies `CRON_SECRET` as a bearer token.
+Create a distinct Enable Banking sandbox application and RSA key pair for Preview. Upload its self-signed certificate in the Enable Banking control panel and store only the application ID and private key in Vercel. `NEXT_PUBLIC_APP_URL` must be the exact HTTPS origin that receives `/api/banking/callback`. Each Vercel preview has a different origin, so use a stable protected preview domain or configure the matching callback origin for that environment. Vercel invokes `/api/banking/sync` every six hours and supplies `CRON_SECRET` as a bearer token.
 
 ## 4. Deploy and smoke-test
 
@@ -70,7 +70,7 @@ Deploy from Vercel, then verify:
 - a CSV import reports imported, duplicate, and invalid rows separately;
 - category, budget, and goal changes persist;
 - the mock bank connection imports data without duplicate provider transactions;
-- with GoCardless sandbox enabled, Sandbox Finance redirects back successfully, writes a consent and sync job, and can be manually synchronised, renewed, and revoked;
+- with Enable Banking sandbox enabled, its Mock ASPSP redirects back successfully, exchanges the callback code for an AIS session, writes a consent and sync job, paginates movements, and can be manually synchronised, renewed, and revoked;
 - CSV export and report printing work;
 - the PWA manifest and service worker load;
 - no service-role or provider secret appears in browser responses or logs.

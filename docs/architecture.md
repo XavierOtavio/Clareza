@@ -11,7 +11,7 @@ Clareza is a standard Next.js App Router application deployed through Vercel. Re
 3. The finance route validates actions, scopes every operation to the demonstration workspace, and records audit events.
 4. The server-only Supabase client uses the service role. It is a deliberate demonstration bootstrap, not the final user-authenticated access pattern.
 5. PostgreSQL constraints, indexes, foreign keys, integer-cent fields, and RLS policies establish the first persistence boundary.
-6. `BankDataProvider` isolates the application from an AISP. `MockBankDataProvider` returns local fictitious data and `GoCardlessBankDataProvider` implements the configurable Bank Account Data sandbox/production API.
+6. `BankDataProvider` isolates the application from an AISP. `MockBankDataProvider` returns local fictitious data and `EnableBankingBankDataProvider` implements the configurable Enable Banking AIS sandbox/production API.
 7. Pure functions in `lib/finance/calculations.ts` calculate balances, cash flow, savings, savings rate, pending values, category totals, and net worth.
 8. The `lib/transactions` domain parses and normalizes CSV files, creates stable duplicate fingerprints, validates API actions with Zod, and evaluates categorization rules independently of React and Supabase.
 
@@ -41,13 +41,13 @@ Rules target either merchant or description and support contains, equality, and 
 
 ### Bank connection and callback
 
-The client obtains institutions from the server, selects a country and starts a connection. The backend generates a random 256-bit callback `state`, stores only its SHA-256 hash with a 15-minute expiry, creates the provider requisition and returns its authorisation URL. Authentication and consent take place outside Clareza. The callback is single-use, validates the state in constant time, resolves the requisition and starts the first synchronisation only after the provider reports a linked connection.
+The client obtains institutions from the server, selects a country and starts a connection. The backend generates a random 256-bit callback `state`, stores only its SHA-256 hash with a 15-minute expiry, creates an Enable Banking authorization and returns its URL. Authentication and consent take place outside Clareza. The callback is single-use, validates the state in constant time, exchanges the temporary `code` for an AIS `session_id`, and starts the first synchronisation only after that session is authorized.
 
-In `mock` mode the same service completes immediately with fictitious data. In `gocardless` + `sandbox` mode it uses the official Sandbox Finance institution and real provider API. Application credentials stay in environment secrets; short-lived provider access tokens remain in server memory and are not persisted or returned to the browser.
+In `mock` mode the same service completes immediately with fictitious data. In `enablebanking` + `sandbox` mode it uses the real Enable Banking API and its sandbox institutions, including Mock ASPSP. The server signs each request with a five-minute RS256 JWT. The application ID and RSA private key stay in environment secrets and are not persisted or returned to the browser.
 
 ### Synchronisation and reconciliation
 
-Callback, manual, and six-hour scheduled jobs pass through the same idempotent service. Each job records its trigger, idempotency key and outcome. The service refreshes account balances, writes timestamped snapshots, looks back seven days from the previous successful sync and upserts provider transactions by stable identifiers.
+Callback, manual, and six-hour scheduled jobs pass through the same idempotent service. Each job records its trigger, idempotency key and outcome. The service refreshes account balances, writes timestamped snapshots, looks back seven days from the previous successful sync, follows all Enable Banking transaction continuation keys with a bounded safety limit, and upserts provider transactions by stable identifiers.
 
 Booked movements replace matching pending rows by explicit provider reference or, when absent, by a conservative account/amount/currency/description/date match. This preserves the local transaction identifier and any user overlay. Transient provider errors use exponential backoff and a small in-process circuit breaker; one unavailable institution does not block the finance API.
 
@@ -72,7 +72,7 @@ Only booked, non-internal transactions enter income and consumption totals. Pend
 - `goals`: target, progress, date, and priority.
 - `bank_connections`: non-secret provider and consent lifecycle metadata.
 - `financial_institutions`: workspace-scoped provider institution cache.
-- `consents`: scopes, provider agreement reference, grant, expiry, and revocation metadata.
+- `consents`: scopes, provider authorization reference, grant, expiry, and revocation metadata.
 - `balance_snapshots`: separate booked, available, and pending values at a timestamp.
 - `sync_jobs`: idempotent callback, manual, and scheduled synchronisation outcomes.
 - `audit_events`: server-side mutation history.

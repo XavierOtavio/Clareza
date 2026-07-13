@@ -46,7 +46,7 @@ create table public.consents (
   id text primary key,
   workspace_id text not null references public.workspaces(id) on delete cascade,
   bank_connection_id text not null references public.bank_connections(id) on delete cascade,
-  provider_agreement_id text,
+  provider_consent_id text,
   status text not null check (status in ('pending', 'active', 'expired', 'revoked', 'error')),
   scopes text[] not null default array['details', 'balances', 'transactions']::text[],
   granted_at timestamptz,

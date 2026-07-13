@@ -10,7 +10,7 @@ The interface explicitly identifies fictitious demonstration data. The mock Open
 - Supabase-backed accounts, transactions, categories, categorization rules, import jobs, budgets, goals, bank connection metadata, and audit events.
 - Manual account and transaction creation, account detail views, and the option to exclude an account from financial totals.
 - Labelled mock bank connection with idempotent transaction import behind `BankDataProvider`.
-- Configurable GoCardless Bank Account Data adapter with its official Sandbox Finance flow, short-lived callback state, consent lifecycle, manual renewal/revocation, and scheduled read-only synchronisation.
+- Configurable Enable Banking AIS adapter with its official sandbox flow, RS256 request authentication, short-lived callback state, consent lifecycle, manual renewal/revocation, and scheduled read-only synchronisation.
 - Balance snapshots, synchronisation jobs, incremental lookback, retries with exponential backoff, circuit breaking, and pending-to-booked transaction reconciliation.
 - Transaction search, account/category/status filters, sorting, CSV import/export, and persisted category corrections stored separately from source data.
 - Configurable, prioritized categorization rules that respect user corrections and apply to existing and newly imported transactions.
@@ -79,18 +79,18 @@ Copy `.env.example` to `.env.local`. Never commit `.env.local` or expose `SUPABA
 
 ## Open Banking
 
-`lib/banking/provider.ts` defines the provider-agnostic contract. The default `mock` mode is entirely local and fictitious. To exercise a real provider API with a fictitious bank, create GoCardless Bank Account Data sandbox credentials and set:
+`lib/banking/provider.ts` defines the provider-agnostic contract. The default `mock` mode is entirely local and fictitious. To exercise the real Enable Banking API against its sandbox institutions, create a sandbox application in the Enable Banking control panel, upload the corresponding self-signed certificate, and set:
 
 ```text
-BANK_DATA_PROVIDER=gocardless
+BANK_DATA_PROVIDER=enablebanking
 BANK_DATA_ENVIRONMENT=sandbox
-GOCARDLESS_BANK_ACCOUNT_DATA_SECRET_ID=...
-GOCARDLESS_BANK_ACCOUNT_DATA_SECRET_KEY=...
+ENABLE_BANKING_APPLICATION_ID=...
+ENABLE_BANKING_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 NEXT_PUBLIC_APP_URL=https://your-preview-domain.vercel.app
 CRON_SECRET=...
 ```
 
-The application redirects consent to GoCardless Sandbox Finance and never receives bank login credentials. Provider access tokens are short-lived and held only in server memory; they are neither persisted nor returned to the browser. Production mode exists as a configuration boundary, but must not be enabled until AISP coverage, contracts, authentication, RLS isolation, legal review, and independent security testing are complete.
+The application obtains the institution catalogue from Enable Banking, redirects authentication and consent outside Clareza, and never receives bank login credentials. Every server request uses a short-lived RS256 JWT signed in memory; the private key never reaches the browser or database. Enable Banking sandbox and production applications are separate. Production mode exists as a configuration boundary, but must not be enabled until AISP coverage, contracts, authentication, RLS isolation, legal review, and independent security testing are complete.
 
 ## Deploying to Vercel
 

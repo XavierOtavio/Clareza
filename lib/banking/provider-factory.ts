@@ -1,22 +1,22 @@
 import "server-only";
 import type { BankDataProvider } from "./provider";
 import { MockBankDataProvider } from "./provider";
-import { GoCardlessBankDataProvider } from "./gocardless-provider";
+import { EnableBankingBankDataProvider } from "./enable-banking-provider";
 
-export type BankProviderName = "mock" | "gocardless";
+export type BankProviderName = "mock" | "enablebanking";
 
 export function configuredProviderName(): BankProviderName {
-  return process.env.BANK_DATA_PROVIDER === "gocardless" ? "gocardless" : "mock";
+  return process.env.BANK_DATA_PROVIDER === "enablebanking" ? "enablebanking" : "mock";
 }
 
 export function createBankDataProvider(name: BankProviderName = configuredProviderName()): BankDataProvider {
   if (name === "mock") return new MockBankDataProvider();
-  return new GoCardlessBankDataProvider({
-    secretId: process.env.GOCARDLESS_BANK_ACCOUNT_DATA_SECRET_ID ?? "",
-    secretKey: process.env.GOCARDLESS_BANK_ACCOUNT_DATA_SECRET_KEY ?? "",
+  return new EnableBankingBankDataProvider({
+    applicationId: process.env.ENABLE_BANKING_APPLICATION_ID ?? "",
+    privateKey: process.env.ENABLE_BANKING_PRIVATE_KEY ?? "",
     environment: process.env.BANK_DATA_ENVIRONMENT === "production" ? "production" : "sandbox",
+    baseUrl: process.env.ENABLE_BANKING_API_URL,
     accessValidDays: Number(process.env.BANK_DATA_ACCESS_VALID_DAYS ?? 90),
-    historicalDays: Number(process.env.BANK_DATA_HISTORY_DAYS ?? 90),
   });
 }
 
@@ -25,6 +25,6 @@ export function publicProviderMode() {
   return {
     provider,
     environment: provider === "mock" ? "demo" : process.env.BANK_DATA_ENVIRONMENT === "production" ? "production" : "sandbox",
-    realBankDataEnabled: provider === "gocardless",
+    realBankDataEnabled: provider === "enablebanking",
   } as const;
 }
