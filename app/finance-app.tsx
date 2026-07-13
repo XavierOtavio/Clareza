@@ -41,7 +41,9 @@ type CategorizationRule = { id: string; name: string; field: "description" | "me
 type ImportJob = { id: string; fileName: string; status: string; totalRows: number; importedRows: number; duplicateRows: number; invalidRows: number; createdAt: string };
 type Budget = { id: string; category: string; limitCents: number; month: string; rollover: number | boolean };
 type Goal = { id: string; name: string; targetCents: number; currentCents: number; targetDate?: string | null; priority: "low" | "medium" | "high" };
-type Connection = { id: string; provider: string; institutionId: string; institutionName: string; status: string; lastSyncedAt?: string | null; consentExpiresAt?: string | null };
+type Connection = { id: string; provider: string; country?: string; institutionId: string; institutionName: string; status: string; lastSyncedAt?: string | null; nextSyncAt?: string | null; consentExpiresAt?: string | null; errorCode?: string | null; errorMessage?: string | null };
+type BankInstitution = { id: string; name: string; country: string; logoUrl?: string };
+type BankProviderMode = { provider: "mock" | "gocardless"; environment: "demo" | "sandbox" | "production"; realBankDataEnabled: boolean };
 
 type FinanceState = {
   mode: "demo";
@@ -164,7 +166,20 @@ export function FinanceApp({ viewer }: { viewer: { name: string; email: string }
         if (!response.ok) throw new Error("A persistência está temporariamente indisponível.");
         return (await response.json()) as FinanceState;
       })
-      .then((state) => active && setData(state))
+      .then((state) => {
+        if (!active) return;
+        setData(state);
+        const callback = new URLSearchParams(window.location.search);
+        if (callback.get("bank") === "connected") {
+          setView("accounts");
+          setToast("Ligação autorizada e primeira sincronização concluída.");
+          window.history.replaceState({}, "", window.location.pathname);
+        } else if (callback.get("bank") === "error") {
+          setView("accounts");
+          setError(callback.get("reason") || "Não foi possível concluir a autorização bancária.");
+          window.history.replaceState({}, "", window.location.pathname);
+        }
+      })
       .catch((loadError: Error) => {
         if (!active) return;
         setData(FALLBACK_STATE);
@@ -200,6 +215,73 @@ export function FinanceApp({ viewer }: { viewer: { name: string; email: string }
       setData(payload);
       setModal(null);
       setToast(successMessage);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Ocorreu um erro inesperado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reloadFinanceState() {
+    const response = await fetch("/api/finance", { cache: "no-store" });
+    if (!response.ok) throw new Error("Não foi possível actualizar os dados financeiros.");
+    setData(await response.json() as FinanceState);
+  }
+
+  async function connectBank(country: string, institutionId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/banking/connections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ country, institutionId }) });
+      const payload = await response.json() as { redirectUrl?: string; error?: string; environment?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível iniciar a ligação bancária.");
+      if (payload.redirectUrl) {
+        window.location.assign(payload.redirectUrl);
+        return;
+      }
+      await reloadFinanceState();
+      setModal(null);
+      setToast(payload.environment === "demo" ? "Banco de demonstração ligado e sincronizado." : "Ligação sincronizada.");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Ocorreu um erro inesperado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function manageConnection(connectionId: string, action: "sync" | "renew") {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/banking/connections/${encodeURIComponent(connectionId)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": `${action}:${connectionId}:${crypto.randomUUID()}` }, body: JSON.stringify({ action }),
+      });
+      const payload = await response.json() as { redirectUrl?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível actualizar a ligação.");
+      if (payload.redirectUrl) {
+        window.location.assign(payload.redirectUrl);
+        return;
+      }
+      await reloadFinanceState();
+      setToast(action === "sync" ? "Sincronização concluída." : "Consentimento renovado.");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Ocorreu um erro inesperado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnectBank(connectionId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/banking/connections/${encodeURIComponent(connectionId)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error || "Não foi possível revogar a ligação.");
+      }
+      await reloadFinanceState();
+      setToast("Consentimento revogado e sincronizações interrompidas.");
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Ocorreu um erro inesperado.");
     } finally {
@@ -261,7 +343,7 @@ export function FinanceApp({ viewer }: { viewer: { name: string; email: string }
 
         <div className="page-content">
           {view === "overview" && <Overview data={data} metrics={metrics} alerts={alerts} onNavigate={changeView} onDismissAlert={(id) => setDismissedAlerts((items) => [...items, id])} />}
-          {view === "accounts" && <AccountsPage data={data} metrics={metrics} onAdd={() => setModal("account")} onConnect={() => setModal("bank")} onOpenAccount={openAccount} onDisconnect={(id) => perform({ type: "disconnectBank", connectionId: id }, "Ligação revogada com sucesso.")} busy={busy} />}
+          {view === "accounts" && <AccountsPage data={data} metrics={metrics} onAdd={() => setModal("account")} onConnect={() => setModal("bank")} onOpenAccount={openAccount} onSync={(id) => manageConnection(id, "sync")} onRenew={(id) => manageConnection(id, "renew")} onDisconnect={disconnectBank} busy={busy} />}
           {view === "transactions" && <TransactionsPage data={data} onCategoryChange={(transactionId, categoryId) => perform({ type: "updateTransactionCategory", transactionId, categoryId }, "Categoria actualizada sem alterar os dados originais.")} onAddTransaction={() => setModal("transaction")} onImport={() => setModal("csvImport")} onAddRule={() => setModal("rule")} onAddCategory={() => setModal("category")} onToggleRule={(ruleId, isActive) => perform({ type: "toggleCategorizationRule", ruleId, isActive }, isActive ? "Regra activada." : "Regra desactivada.")} onDeleteRule={(ruleId) => perform({ type: "deleteCategorizationRule", ruleId }, "Regra eliminada.")} busy={busy} />}
           {view === "budgets" && <BudgetsPage data={data} metrics={metrics} onAdd={() => setModal("budget")} />}
           {view === "planning" && <PlanningPage data={data} onAdd={() => setModal("goal")} />}
@@ -272,7 +354,7 @@ export function FinanceApp({ viewer }: { viewer: { name: string; email: string }
       </main>
 
       <MobileNavigation activeView={view} onNavigate={changeView} />
-      {modal && <ModalLayer modal={modal} data={data} selectedAccount={selectedAccount} busy={busy} onClose={() => setModal(null)} onSubmit={perform} onToggleAccountVisibility={(accountId, isHidden) => perform({ type: "toggleAccountVisibility", accountId, isHidden }, isHidden ? "Conta ocultada dos totais." : "Conta novamente incluída nos totais.")} />}
+      {modal && <ModalLayer modal={modal} data={data} selectedAccount={selectedAccount} busy={busy} onClose={() => setModal(null)} onSubmit={perform} onConnectBank={connectBank} onToggleAccountVisibility={(accountId, isHidden) => perform({ type: "toggleAccountVisibility", accountId, isHidden }, isHidden ? "Conta ocultada dos totais." : "Conta novamente incluída nos totais.")} />}
       {toast && <div className="toast" role="status"><Icon name="check" />{toast}</div>}
     </div>
   );
@@ -433,7 +515,7 @@ function GoalMini({ goal }: { goal: Goal }) {
   return <div className="goal-mini"><div className="goal-ring" style={{ background: `conic-gradient(#2a8f6e ${percentage}%, var(--border) ${percentage}% 100%)` }}><span>{percentage}%</span></div><span><strong>{goal.name}</strong><small>{formatMoney(goal.currentCents)} de {formatMoney(goal.targetCents)}</small></span></div>;
 }
 
-function AccountsPage({ data, metrics, onAdd, onConnect, onOpenAccount, onDisconnect, busy }: { data: FinanceState; metrics: Metrics; onAdd: () => void; onConnect: () => void; onOpenAccount: (account: Account) => void; onDisconnect: (id: string) => void; busy: boolean }) {
+function AccountsPage({ data, metrics, onAdd, onConnect, onOpenAccount, onSync, onRenew, onDisconnect, busy }: { data: FinanceState; metrics: Metrics; onAdd: () => void; onConnect: () => void; onOpenAccount: (account: Account) => void; onSync: (id: string) => void; onRenew: (id: string) => void; onDisconnect: (id: string) => void; busy: boolean }) {
   const visibleAccounts = data.accounts.filter((account) => !Boolean(account.isHidden));
   return (
     <>
@@ -448,8 +530,8 @@ function AccountsPage({ data, metrics, onAdd, onConnect, onOpenAccount, onDiscon
 
       <section className="surface-card connections-section">
         <div className="section-heading"><div><p className="section-kicker">Open Banking</p><h2>Ligações bancárias</h2></div><button className="secondary-button" type="button" onClick={onConnect}><Icon name="plus" /> Nova ligação</button></div>
-        <div className="connection-list">{data.connections.map((connection) => <div className="connection-row" key={connection.id}><span className="institution-logo"><Icon name="bank" /></span><span><strong>{connection.institutionName}</strong><small>Prestador: {connection.provider === "mock" ? "Sandbox de demonstração" : connection.provider}</small></span><span className={`connection-status ${connection.status}`}><i />{connection.status === "connected" ? "Ligada" : connection.status === "revoked" ? "Revogada" : connection.status}</span><span><small>Última sincronização</small><strong>{formatDate(connection.lastSyncedAt, true)}</strong></span>{connection.status === "connected" && <button className="danger-text-button" type="button" disabled={busy} onClick={() => onDisconnect(connection.id)}>Revogar</button>}</div>)}</div>
-        <div className="sandbox-note"><Icon name="info" /><span><strong>Dados de demonstração</strong> Esta versão usa um conector sandbox com a mesma interface do conector real. Não foram recolhidas credenciais bancárias.</span></div>
+        <div className="connection-list">{data.connections.length ? data.connections.map((connection) => <div className="connection-row" key={connection.id}><span className="institution-logo"><Icon name="bank" /></span><span><strong>{connection.institutionName}</strong><small>Prestador: {connection.provider === "mock" ? "Demonstração local" : "GoCardless Bank Account Data"}</small>{connection.errorMessage && <small className="connection-error">{connection.errorMessage}</small>}</span><span className={`connection-status ${connection.status}`}><i />{connectionStatusLabel(connection.status)}</span><span><small>Última sincronização</small><strong>{formatDate(connection.lastSyncedAt, true)}</strong></span><span className="connection-actions">{connection.status === "connected" && <button className="secondary-text-button" type="button" disabled={busy} onClick={() => onSync(connection.id)}>Sincronizar</button>}{["expired", "requires_action", "error"].includes(connection.status) && <button className="secondary-text-button" type="button" disabled={busy} onClick={() => onRenew(connection.id)}>Renovar</button>}{connection.status !== "revoked" && <button className="danger-text-button" type="button" disabled={busy} onClick={() => { if (window.confirm("Revogar o consentimento e interromper futuras sincronizações?")) onDisconnect(connection.id); }}>Revogar</button>}</span></div>) : <EmptyState icon="bank" title="Sem ligações bancárias" description="Ligue uma instituição no sandbox ou continue com contas manuais e importação CSV." />}</div>
+        <div className="sandbox-note"><Icon name="info" /><span><strong>Read-only e sem credenciais bancárias</strong> A autenticação e o consentimento decorrem no prestador ou banco. A Clareza recebe apenas contas, saldos e movimentos autorizados; pagamentos permanecem fora desta versão.</span></div>
       </section>
     </>
   );
@@ -561,7 +643,7 @@ function SettingsPage({ data, viewer, busy, onReset }: { data: FinanceState; vie
       <section className="surface-card settings-card"><div className="settings-heading"><span className="round-icon"><Icon name="user" /></span><div><h2>Perfil e espaço</h2><p>Identidade visível nesta sessão.</p></div></div><dl><div><dt>Nome</dt><dd>{viewer.name}</dd></div><div><dt>Email</dt><dd>{viewer.email}</dd></div><div><dt>Espaço</dt><dd>{data.workspace.name}</dd></div><div><dt>Modo</dt><dd><span className="demo-pill small"><span /> Demonstração</span></dd></div></dl></section>
       <section className="surface-card settings-card"><div className="settings-heading"><span className="round-icon"><Icon name="bell" /></span><div><h2>Notificações</h2><p>Escolha apenas alertas úteis.</p></div></div><label className="toggle-row"><span><strong>Alertas financeiros</strong><small>Orçamentos, saldos e consentimentos.</small></span><input type="checkbox" checked={alerts} onChange={(event) => setAlerts(event.target.checked)} /><i /></label><label className="toggle-row"><span><strong>Comunicações de produto</strong><small>Novidades e melhorias ocasionais.</small></span><input type="checkbox" checked={marketing} onChange={(event) => setMarketing(event.target.checked)} /><i /></label></section>
       <section className="surface-card settings-card wide"><div className="settings-heading"><span className="round-icon"><Icon name="shield" /></span><div><h2>Privacidade e dados</h2><p>Acções críticas permanecem sob o seu controlo.</p></div></div><div className="privacy-actions"><div><span><strong>Exportar os meus dados</strong><small>Descarregue os movimentos desta demonstração em CSV.</small></span><button className="secondary-button" type="button" onClick={() => exportTransactionsCsv(data.transactions)}><Icon name="download" /> Exportar</button></div><div><span><strong>Repor dados de demonstração</strong><small>Remove alterações manuais e volta ao conjunto fictício inicial.</small></span><button className="danger-button" disabled={busy} type="button" onClick={onReset}>{busy ? "A repor…" : "Repor demonstração"}</button></div></div></section>
-      <section className="sandbox-note wide"><Icon name="info" /><span><strong>Limite desta versão:</strong> a identidade é fornecida pelo ambiente de demonstração. MFA, convites familiares, Supabase Auth e o prestador AISP real exigem configuração e credenciais próprias antes de produção.</span></section>
+      <section className="sandbox-note wide"><Icon name="info" /><span><strong>Limite desta versão:</strong> a identidade e o espaço continuam a ser de demonstração. O sandbox do prestador já pode ser configurado, mas MFA, convites familiares, autorização por utilizador, validação regulatória e revisão de segurança são obrigatórios antes de dados reais.</span></section>
     </div>
   );
 }
@@ -570,7 +652,64 @@ function NotificationPanel({ alerts, onDismiss }: { alerts: AlertItem[]; onDismi
   return <div className="notification-panel"><div><strong>Alertas</strong><span>{alerts.length} por rever</span></div>{alerts.length ? alerts.map((alert) => <article key={alert.id}><span className={`alert-symbol ${alert.tone}`}><Icon name={alert.tone === "success" ? "check" : alert.tone === "warning" ? "warning" : "info"} /></span><span><strong>{alert.title}</strong><small>{alert.detail}</small></span><button type="button" onClick={() => onDismiss(alert.id)} aria-label="Dispensar alerta"><Icon name="close" /></button></article>) : <p className="empty-notifications">Não existem alertas por rever.</p>}</div>;
 }
 
-function ModalLayer({ modal, data, selectedAccount, busy, onClose, onSubmit, onToggleAccountVisibility }: { modal: Exclude<Modal, null>; data: FinanceState; selectedAccount: Account | null; busy: boolean; onClose: () => void; onSubmit: (action: ActionPayload, message: string) => Promise<void>; onToggleAccountVisibility: (accountId: string, isHidden: boolean) => Promise<void> }) {
+function connectionStatusLabel(status: string) {
+  return ({ connected: "Ligada", syncing: "A sincronizar", requires_action: "Requer acção", expired: "Consentimento expirado", revoked: "Revogada", error: "Com erro" } as Record<string, string>)[status] ?? status;
+}
+
+function BankConnectionForm({ busy, onClose, onConnect }: { busy: boolean; onClose: () => void; onConnect: (country: string, institutionId: string) => Promise<void> }) {
+  const [country, setCountry] = useState("PT");
+  const [institutions, setInstitutions] = useState<BankInstitution[]>([]);
+  const [selected, setSelected] = useState("");
+  const [mode, setMode] = useState<BankProviderMode | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/banking/institutions?country=${encodeURIComponent(country)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as BankProviderMode & { institutions?: BankInstitution[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Não foi possível carregar as instituições.");
+        return payload;
+      })
+      .then((payload) => {
+        if (!active) return;
+        const next = payload.institutions ?? [];
+        setInstitutions(next);
+        setSelected(next[0]?.id ?? "");
+        setMode(payload);
+      })
+      .catch((error: Error) => active && setLoadError(error.message))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [country]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (selected) await onConnect(country, selected);
+  }
+
+  const banner = mode?.environment === "production"
+    ? { title: "Ligação a dados bancários reais", copy: "Será redireccionado para o prestador ou banco para autenticar e autorizar acesso read-only." }
+    : mode?.environment === "sandbox"
+      ? { title: "Sandbox real do prestador", copy: "O fluxo usa a API sandbox da GoCardless e o banco fictício Sandbox Finance." }
+      : { title: "Demonstração local", copy: "O mock não contacta bancos nem solicita credenciais, mas respeita o mesmo contrato técnico." };
+
+  return <form className="modal-form" onSubmit={submit}>
+    <div className="sandbox-banner"><Icon name="shield" /><span><strong>{banner.title}</strong>{banner.copy}</span></div>
+    <label>País<select value={country} onChange={(event) => { setLoading(true); setLoadError(null); setCountry(event.target.value); }}><option value="PT">Portugal</option><option value="ES">Espanha</option><option value="FR">França</option><option value="DE">Alemanha</option><option value="IE">Irlanda</option></select></label>
+    <fieldset className="institution-options"><legend>Instituição</legend>
+      {loading && <div className="institution-loading" aria-live="polite"><span className="spinner dark" /> A carregar instituições…</div>}
+      {loadError && <div className="inline-form-error" role="alert">{loadError}</div>}
+      {!loading && !loadError && institutions.length === 0 && <p className="empty-institutions">Não existem instituições disponíveis para este país no ambiente seleccionado.</p>}
+      {institutions.map((institution) => <label key={institution.id}><input type="radio" name="institution" value={institution.id} checked={selected === institution.id} onChange={() => setSelected(institution.id)} /><span className="institution-logo"><Icon name="bank" /></span><span><strong>{institution.name}</strong><small>{mode?.environment === "production" ? "Ligação bancária read-only" : mode?.environment === "sandbox" ? "Sandbox do prestador" : "Dados inteiramente fictícios"}</small></span><Icon name="arrow" /></label>)}
+    </fieldset>
+    <p className="consent-copy">A Clareza nunca recebe o utilizador, palavra-passe ou código de autenticação do homebanking. Depois do consentimento, inicia uma sincronização idempotente de contas, saldos e movimentos.</p>
+    <ModalActions busy={busy} disabled={loading || Boolean(loadError) || !selected} onClose={onClose} submitLabel={mode?.environment === "production" ? "Continuar para o banco" : "Continuar no sandbox"} />
+  </form>;
+}
+
+function ModalLayer({ modal, data, selectedAccount, busy, onClose, onSubmit, onConnectBank, onToggleAccountVisibility }: { modal: Exclude<Modal, null>; data: FinanceState; selectedAccount: Account | null; busy: boolean; onClose: () => void; onSubmit: (action: ActionPayload, message: string) => Promise<void>; onConnectBank: (country: string, institutionId: string) => Promise<void>; onToggleAccountVisibility: (accountId: string, isHidden: boolean) => Promise<void> }) {
   function submitAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const balanceCents = moneyInputToCents(form.get("balance"));
     onSubmit({ type: "createAccount", name: String(form.get("name")), accountType: String(form.get("accountType")), balanceCents }, "Conta manual criada.");
@@ -582,10 +721,6 @@ function ModalLayer({ modal, data, selectedAccount, busy, onClose, onSubmit, onT
   function submitGoal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     onSubmit({ type: "createGoal", name: String(form.get("name")), targetCents: moneyInputToCents(form.get("target")), currentCents: moneyInputToCents(form.get("current")), targetDate: String(form.get("targetDate")) }, "Objectivo criado.");
-  }
-  function submitBank(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const form = new FormData(event.currentTarget);
-    onSubmit({ type: "connectMockBank", institutionId: String(form.get("institution")) }, "Banco de demonstração ligado e sincronizado.");
   }
   function submitTransaction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -602,11 +737,11 @@ function ModalLayer({ modal, data, selectedAccount, busy, onClose, onSubmit, onT
 
   const accountTransactions = selectedAccount ? data.transactions.filter((transaction) => transaction.accountId === selectedAccount.id) : [];
   const titles: Record<Exclude<Modal, null>, string> = { account: "Adicionar conta manual", bank: "Ligar instituição", budget: "Criar orçamento", goal: "Novo objectivo", accountDetails: selectedAccount?.name ?? "Detalhe da conta", transaction: "Adicionar movimento manual", csvImport: "Importar movimentos CSV", rule: "Nova regra de categorização", category: "Nova categoria" };
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-header"><div><p className="section-kicker">{modal === "bank" ? "Open Banking · Sandbox" : "Clareza"}</p><h2 id="modal-title">{titles[modal]}</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-header"><div><p className="section-kicker">{modal === "bank" ? "Open Banking · Read-only" : "Clareza"}</p><h2 id="modal-title">{titles[modal]}</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></div>
     {modal === "account" && <form className="modal-form" onSubmit={submitAccount}><label>Nome da conta<input name="name" required minLength={2} placeholder="Ex.: Conta poupança" /></label><label>Tipo<select name="accountType" defaultValue="checking"><option value="checking">Conta à ordem</option><option value="savings">Conta poupança</option><option value="credit">Cartão de crédito</option><option value="cash">Dinheiro</option><option value="investment">Investimento</option><option value="loan">Empréstimo</option></select></label><label>Saldo contabilístico<div className="money-field"><input name="balance" required inputMode="decimal" placeholder="0,00" /><span>EUR</span></div><small>Use um valor negativo para dívida ou crédito utilizado.</small></label><ModalActions busy={busy} onClose={onClose} submitLabel="Criar conta" /></form>}
     {modal === "budget" && <form className="modal-form" onSubmit={submitBudget}><label>Categoria<select name="category" defaultValue="Supermercado">{data.categories.filter((item) => item.kind === "expense").map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label>Limite mensal<div className="money-field"><input name="limit" required inputMode="decimal" placeholder="300,00" /><span>EUR</span></div></label><div className="form-note"><Icon name="info" /> Se já existir um orçamento para esta categoria em Julho, o limite será actualizado.</div><ModalActions busy={busy} onClose={onClose} submitLabel="Guardar orçamento" /></form>}
     {modal === "goal" && <form className="modal-form" onSubmit={submitGoal}><label>Nome do objectivo<input name="name" required placeholder="Ex.: Entrada para habitação" /></label><div className="form-row"><label>Montante-alvo<div className="money-field"><input name="target" required inputMode="decimal" placeholder="10 000,00" /><span>EUR</span></div></label><label>Já acumulado<div className="money-field"><input name="current" required inputMode="decimal" defaultValue="0,00" /><span>EUR</span></div></label></div><label>Data-alvo<input type="date" name="targetDate" min="2026-07-11" /></label><ModalActions busy={busy} onClose={onClose} submitLabel="Criar objectivo" /></form>}
-    {modal === "bank" && <form className="modal-form" onSubmit={submitBank}><div className="sandbox-banner"><Icon name="shield" /><span><strong>Ambiente sandbox</strong> O fluxo abaixo não contacta um banco real nem solicita credenciais.</span></div><label>País<select name="country" defaultValue="PT"><option value="PT">Portugal</option></select></label><fieldset className="institution-options"><legend>Instituição</legend>{[["pt-demo-atlantico", "Banco Atlântico", "Sandbox português"], ["pt-demo-lusitano", "Banco Lusitano", "Sandbox português"]].map(([id, name, detail], index) => <label key={id}><input type="radio" name="institution" value={id} defaultChecked={index === 0} /><span className="institution-logo"><Icon name="bank" /></span><span><strong>{name}</strong><small>{detail}</small></span><Icon name="arrow" /></label>)}</fieldset><p className="consent-copy">Ao continuar, será simulada a autorização read-only e a primeira sincronização de contas, saldos e movimentos.</p><ModalActions busy={busy} onClose={onClose} submitLabel="Continuar no sandbox" /></form>}
+    {modal === "bank" && <BankConnectionForm busy={busy} onClose={onClose} onConnect={onConnectBank} />}
     {modal === "transaction" && <form className="modal-form" onSubmit={submitTransaction}><label>Conta<select name="accountId">{data.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label><div className="form-row"><label>Data<input name="bookedAt" type="date" required defaultValue="2026-07-10" /></label><label>Estado<select name="status" defaultValue="booked"><option value="booked">Contabilizado</option><option value="pending">Pendente</option></select></label></div><label>Descrição<input name="description" required maxLength={160} placeholder="Ex.: Compra de supermercado" /></label><label>Comerciante<input name="merchant" maxLength={160} placeholder="Opcional" /></label><div className="form-row"><label>Montante<div className="money-field"><input name="amount" required inputMode="decimal" placeholder="-42,50" /><span>EUR</span></div><small>Use um valor negativo para uma saída.</small></label><label>Categoria<select name="categoryId">{data.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><label className="checkbox-row"><input name="isInternalTransfer" type="checkbox" /><span><strong>Transferência entre contas próprias</strong><small>Fica excluída das despesas de consumo.</small></span></label><ModalActions busy={busy} onClose={onClose} submitLabel="Criar movimento" /></form>}
     {modal === "rule" && <form className="modal-form" onSubmit={submitRule}><label>Nome da regra<input name="name" required placeholder="Ex.: Compras no Continente" /></label><div className="form-row"><label>Campo<select name="field" defaultValue="merchant"><option value="merchant">Comerciante</option><option value="description">Descrição</option></select></label><label>Condição<select name="operator" defaultValue="contains"><option value="contains">Contém</option><option value="equals">É igual a</option><option value="starts_with">Começa por</option></select></label></div><label>Texto a procurar<input name="pattern" required placeholder="Ex.: CONTINENTE" /></label><div className="form-row"><label>Categoria<select name="categoryId">{data.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Prioridade<input name="priority" type="number" min="0" max="100" defaultValue="50" required /></label></div><label className="checkbox-row"><input name="applyToExisting" type="checkbox" defaultChecked /><span><strong>Aplicar a movimentos existentes</strong><small>As correcções manuais do utilizador nunca são substituídas.</small></span></label><ModalActions busy={busy} onClose={onClose} submitLabel="Criar regra" /></form>}
     {modal === "category" && <form className="modal-form" onSubmit={submitCategory}><label>Nome da categoria<input name="name" required maxLength={80} placeholder="Ex.: Animais de estimação" /></label><label>Tipo<select name="kind" defaultValue="expense"><option value="expense">Despesa</option><option value="income">Rendimento</option><option value="transfer">Transferência</option></select></label><div className="form-note"><Icon name="info" /> A categoria ficará disponível nos movimentos, regras e orçamentos compatíveis.</div><ModalActions busy={busy} onClose={onClose} submitLabel="Criar categoria" /></form>}

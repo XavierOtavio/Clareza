@@ -11,7 +11,7 @@ Clareza is a standard Next.js App Router application deployed through Vercel. Re
 3. The finance route validates actions, scopes every operation to the demonstration workspace, and records audit events.
 4. The server-only Supabase client uses the service role. It is a deliberate demonstration bootstrap, not the final user-authenticated access pattern.
 5. PostgreSQL constraints, indexes, foreign keys, integer-cent fields, and RLS policies establish the first persistence boundary.
-6. `BankDataProvider` isolates the application from an AISP. Only `MockBankDataProvider`, which returns fictitious data, is active.
+6. `BankDataProvider` isolates the application from an AISP. `MockBankDataProvider` returns local fictitious data and `GoCardlessBankDataProvider` implements the configurable Bank Account Data sandbox/production API.
 7. Pure functions in `lib/finance/calculations.ts` calculate balances, cash flow, savings, savings rate, pending values, category totals, and net worth.
 8. The `lib/transactions` domain parses and normalizes CSV files, creates stable duplicate fingerprints, validates API actions with Zod, and evaluates categorization rules independently of React and Supabase.
 
@@ -39,9 +39,17 @@ The client reads the selected file only to propose a column mapping and preview 
 
 Rules target either merchant or description and support contains, equality, and starts-with operators. Matching is case-insensitive and accent-insensitive. Re-evaluation uses explicit priority and never overwrites a transaction with a user-authored category overlay.
 
-### Mock bank connection
+### Bank connection and callback
 
-The user selects a fictitious institution. The provider contract returns accounts and transactions. Stable provider transaction identifiers and a unique database constraint make repeated imports idempotent.
+The client obtains institutions from the server, selects a country and starts a connection. The backend generates a random 256-bit callback `state`, stores only its SHA-256 hash with a 15-minute expiry, creates the provider requisition and returns its authorisation URL. Authentication and consent take place outside Clareza. The callback is single-use, validates the state in constant time, resolves the requisition and starts the first synchronisation only after the provider reports a linked connection.
+
+In `mock` mode the same service completes immediately with fictitious data. In `gocardless` + `sandbox` mode it uses the official Sandbox Finance institution and real provider API. Application credentials stay in environment secrets; short-lived provider access tokens remain in server memory and are not persisted or returned to the browser.
+
+### Synchronisation and reconciliation
+
+Callback, manual, and six-hour scheduled jobs pass through the same idempotent service. Each job records its trigger, idempotency key and outcome. The service refreshes account balances, writes timestamped snapshots, looks back seven days from the previous successful sync and upserts provider transactions by stable identifiers.
+
+Booked movements replace matching pending rows by explicit provider reference or, when absent, by a conservative account/amount/currency/description/date match. This preserves the local transaction identifier and any user overlay. Transient provider errors use exponential backoff and a small in-process circuit breaker; one unavailable institution does not block the finance API.
 
 ### Category correction
 
@@ -63,9 +71,13 @@ Only booked, non-internal transactions enter income and consumption totals. Pend
 - `budgets`: category limit per workspace and month.
 - `goals`: target, progress, date, and priority.
 - `bank_connections`: non-secret provider and consent lifecycle metadata.
+- `financial_institutions`: workspace-scoped provider institution cache.
+- `consents`: scopes, provider agreement reference, grant, expiry, and revocation metadata.
+- `balance_snapshots`: separate booked, available, and pending values at a timestamp.
+- `sync_jobs`: idempotent callback, manual, and scheduled synchronisation outcomes.
 - `audit_events`: server-side mutation history.
 
-The production model must add consent/token envelopes, balance snapshots, splits, normalized merchants, tags, recurring items, debts, investments, documents, notifications, synchronisation jobs, and immutable audit detail.
+The production model must still add splits, normalized merchants, tags, recurring items, debts, investments, documents, notifications, and immutable audit detail. If a future provider requires persistent user tokens, they must be stored in a dedicated encrypted envelope rather than `bank_connections`.
 
 ## Security posture
 
@@ -74,4 +86,6 @@ The production model must add consent/token envelopes, balance snapshots, splits
 - Financial values use integer cents in application and database storage.
 - The PWA service worker does not cache finance API responses.
 - RLS policies exist for authenticated workspace members, but the current API uses a fixed demonstration workspace and service role.
-- Public authentication, MFA, user-scoped API access, independent RLS testing, token encryption, penetration testing, and legal review remain production prerequisites.
+- Callback state is short-lived, hashed, and single-use; callback origins require HTTPS outside localhost.
+- Provider requests stay server-only, use bounded retries, and retain only minimal reconciliation metadata. Full IBANs and raw transaction payloads are not stored.
+- Public authentication, MFA, user-scoped API access, independent RLS testing, penetration testing, provider contracts, and legal review remain production prerequisites.

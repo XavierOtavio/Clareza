@@ -10,6 +10,7 @@ Run all SQL files in `supabase/migrations/` in filename order in the Supabase SQ
 
 1. `202607100001_clareza_foundation.sql`
 2. `202607110001_financial_core.sql`
+3. `202607130001_open_banking.sql`
 
 Alternatively, link the Supabase CLI and run:
 
@@ -36,22 +37,25 @@ NEXT_PUBLIC_APP_URL=https://your-vercel-domain.vercel.app
 NEXT_PUBLIC_DEMO_USER_NAME=Tiago
 NEXT_PUBLIC_DEMO_USER_EMAIL=modo@demonstracao.pt
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+SUPABASE_SECRET_KEY=your-server-only-secret-key
 BANK_DATA_PROVIDER=mock
+CRON_SECRET=generate-a-long-random-value
 ```
 
-The following variables are placeholders for later authentication and real Open Banking work:
+For the real provider API with fictitious Sandbox Finance data, use:
 
 ```text
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-BANK_DATA_CLIENT_ID=
-BANK_DATA_CLIENT_SECRET=
-BANK_DATA_WEBHOOK_SECRET=
-BANK_TOKEN_ENCRYPTION_KEY=
+BANK_DATA_PROVIDER=gocardless
+BANK_DATA_ENVIRONMENT=sandbox
+BANK_DATA_ACCESS_VALID_DAYS=90
+BANK_DATA_HISTORY_DAYS=90
+GOCARDLESS_BANK_ACCOUNT_DATA_SECRET_ID=your-sandbox-secret-id
+GOCARDLESS_BANK_ACCOUNT_DATA_SECRET_KEY=your-sandbox-secret-key
 ```
 
 Never use a `NEXT_PUBLIC_` prefix for the Supabase service-role key or banking secrets.
+
+`NEXT_PUBLIC_APP_URL` must be the exact HTTPS origin that receives `/api/banking/callback`. Each Vercel preview has a different origin, so either configure a stable protected preview domain or set separate credentials/origins per environment. Vercel invokes `/api/banking/sync` every six hours and supplies `CRON_SECRET` as a bearer token.
 
 ## 4. Deploy and smoke-test
 
@@ -66,11 +70,12 @@ Deploy from Vercel, then verify:
 - a CSV import reports imported, duplicate, and invalid rows separately;
 - category, budget, and goal changes persist;
 - the mock bank connection imports data without duplicate provider transactions;
+- with GoCardless sandbox enabled, Sandbox Finance redirects back successfully, writes a consent and sync job, and can be manually synchronised, renewed, and revoked;
 - CSV export and report printing work;
 - the PWA manifest and service worker load;
 - no service-role or provider secret appears in browser responses or logs.
 
-If `/api/finance` returns HTTP 503, confirm that both `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present in the selected Vercel environment and redeploy.
+If `/api/finance` returns HTTP 503, confirm that both `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are present in the selected Vercel environment and redeploy.
 
 ## 5. Custom domain and deployment protection
 
@@ -80,8 +85,7 @@ Attach the custom domain only after the preview smoke tests pass. For demonstrat
 
 - Supabase Auth with MFA or passkeys and server-side workspace resolution;
 - user-scoped data access plus tested RLS isolation;
-- a contracted licensed AISP implementation behind `BankDataProvider`;
-- encrypted provider tokens, validated callback state and webhook signatures;
-- pending-to-booked reconciliation, incremental synchronisation, retries, rate limits, and consent renewal;
+- contracted AISP coverage and supplier/regulatory validation for the production provider mode;
+- distributed rate limiting, signed webhooks if supported, and an encrypted token envelope if a future provider requires persistent user tokens;
 - data export, erasure, retention, backup recovery, monitoring, and incident procedures;
 - Playwright journeys, security assessment, accessibility audit, and legal review.

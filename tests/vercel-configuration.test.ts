@@ -31,14 +31,20 @@ test("has no Cloudflare or Vinext runtime dependencies", () => {
 });
 
 test("declares Vercel and Supabase deployment assets", () => {
-  const vercel = JSON.parse(read("vercel.json")) as { framework: string; regions: string[] };
+  const vercel = JSON.parse(read("vercel.json")) as { framework: string; regions: string[]; crons: { path: string; schedule: string }[] };
 
   assert.equal(vercel.framework, "nextjs");
   assert.deepEqual(vercel.regions, ["fra1"]);
+  assert.deepEqual(vercel.crons, [{ path: "/api/banking/sync", schedule: "0 */6 * * *" }]);
   assert.match(read("supabase/migrations/202607100001_clareza_foundation.sql"), /enable row level security/i);
   const financialCoreMigration = read("supabase/migrations/202607110001_financial_core.sql");
   assert.match(financialCoreMigration, /transactions_import_fingerprint_unique/i);
   assert.match(financialCoreMigration, /transaction_user_edits/i);
   assert.match(financialCoreMigration, /members manage categorization rules/i);
-  assert.match(read(".env.example"), /SUPABASE_SERVICE_ROLE_KEY=/);
+  assert.match(read(".env.example"), /SUPABASE_SECRET_KEY=/);
+  const bankingMigration = read("supabase/migrations/202607130001_open_banking.sql");
+  assert.match(bankingMigration, /callback_state_hash/i);
+  assert.match(bankingMigration, /balance_snapshots/i);
+  assert.match(bankingMigration, /sync_jobs/i);
+  assert.match(bankingMigration, /enable row level security/i);
 });
