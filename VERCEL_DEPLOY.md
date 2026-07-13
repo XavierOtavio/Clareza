@@ -10,6 +10,7 @@ Run all SQL files in `supabase/migrations/` in filename order in the Supabase SQ
 
 1. `202607100001_clareza_foundation.sql`
 2. `202607110001_financial_core.sql`
+3. `202607130001_open_banking.sql`
 
 Alternatively, link the Supabase CLI and run:
 
@@ -36,22 +37,25 @@ NEXT_PUBLIC_APP_URL=https://your-vercel-domain.vercel.app
 NEXT_PUBLIC_DEMO_USER_NAME=Tiago
 NEXT_PUBLIC_DEMO_USER_EMAIL=modo@demonstracao.pt
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+SUPABASE_SECRET_KEY=your-server-only-secret-key
 BANK_DATA_PROVIDER=mock
+CRON_SECRET=generate-a-long-random-value
 ```
 
-The following variables are placeholders for later authentication and real Open Banking work:
+For the real Enable Banking API with sandbox institutions, use:
 
 ```text
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-BANK_DATA_CLIENT_ID=
-BANK_DATA_CLIENT_SECRET=
-BANK_DATA_WEBHOOK_SECRET=
-BANK_TOKEN_ENCRYPTION_KEY=
+BANK_DATA_PROVIDER=enablebanking
+BANK_DATA_ENVIRONMENT=sandbox
+BANK_DATA_ACCESS_VALID_DAYS=90
+ENABLE_BANKING_APPLICATION_ID=your-sandbox-application-id
+ENABLE_BANKING_PRIVATE_KEY=your-pkcs8-rsa-private-key-with-escaped-newlines
+ENABLE_BANKING_API_URL=https://api.enablebanking.com
 ```
 
 Never use a `NEXT_PUBLIC_` prefix for the Supabase service-role key or banking secrets.
+
+Create a distinct Enable Banking sandbox application and RSA key pair for Preview. Upload its self-signed certificate in the Enable Banking control panel and store only the application ID and private key in Vercel. `NEXT_PUBLIC_APP_URL` must be the exact HTTPS origin that receives `/api/banking/callback`. Each Vercel preview has a different origin, so use a stable protected preview domain or configure the matching callback origin for that environment. Vercel invokes `/api/banking/sync` daily at 04:00 UTC and supplies `CRON_SECRET` as a bearer token. This daily cadence is compatible with Vercel Hobby; more frequent production schedules require a suitable Vercel plan and an intentional update to both the cron and sync interval.
 
 ## 4. Deploy and smoke-test
 
@@ -66,11 +70,12 @@ Deploy from Vercel, then verify:
 - a CSV import reports imported, duplicate, and invalid rows separately;
 - category, budget, and goal changes persist;
 - the mock bank connection imports data without duplicate provider transactions;
+- with Enable Banking sandbox enabled, its Mock ASPSP redirects back successfully, exchanges the callback code for an AIS session, writes a consent and sync job, paginates movements, and can be manually synchronised, renewed, and revoked;
 - CSV export and report printing work;
 - the PWA manifest and service worker load;
 - no service-role or provider secret appears in browser responses or logs.
 
-If `/api/finance` returns HTTP 503, confirm that both `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present in the selected Vercel environment and redeploy.
+If `/api/finance` returns HTTP 503, confirm that both `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are present in the selected Vercel environment and redeploy.
 
 ## 5. Custom domain and deployment protection
 
@@ -80,8 +85,7 @@ Attach the custom domain only after the preview smoke tests pass. For demonstrat
 
 - Supabase Auth with MFA or passkeys and server-side workspace resolution;
 - user-scoped data access plus tested RLS isolation;
-- a contracted licensed AISP implementation behind `BankDataProvider`;
-- encrypted provider tokens, validated callback state and webhook signatures;
-- pending-to-booked reconciliation, incremental synchronisation, retries, rate limits, and consent renewal;
+- contracted AISP coverage and supplier/regulatory validation for the production provider mode;
+- distributed rate limiting, signed webhooks if supported, and an encrypted token envelope if a future provider requires persistent user tokens;
 - data export, erasure, retention, backup recovery, monitoring, and incident procedures;
 - Playwright journeys, security assessment, accessibility audit, and legal review.

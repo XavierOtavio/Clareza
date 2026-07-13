@@ -154,6 +154,8 @@ async function seedDemoData(force = false) {
     id: "connection-demo",
     workspace_id: WORKSPACE_ID,
     provider: "mock",
+    provider_connection_id: "mock-pt-demo-lusitano",
+    country: "PT",
     institution_id: "pt-demo-lusitano",
     institution_name: "Banco Lusitano — Demonstração",
     status: "connected",
@@ -222,7 +224,19 @@ async function loadState() {
     imports: (importsResult.data as DatabaseRow[]).map((row) => ({ id: row.id, fileName: row.file_name, status: row.status, totalRows: row.total_rows, importedRows: row.imported_rows, duplicateRows: row.duplicate_rows, invalidRows: row.invalid_rows, createdAt: row.created_at })),
     budgets: (budgetsResult.data as DatabaseRow[]).map((row) => ({ id: row.id, category: row.category, limitCents: row.limit_cents, month: row.month, rollover: row.rollover })),
     goals: (goalsResult.data as DatabaseRow[]).map((row) => ({ id: row.id, name: row.name, targetCents: row.target_cents, currentCents: row.current_cents, targetDate: row.target_date, priority: row.priority })),
-    connections: (connectionsResult.data as DatabaseRow[]).map((row) => ({ id: row.id, provider: row.provider, institutionId: row.institution_id, institutionName: row.institution_name, status: row.status, lastSyncedAt: row.last_synced_at, consentExpiresAt: row.consent_expires_at })),
+    connections: (connectionsResult.data as DatabaseRow[]).map((row) => ({
+      id: row.id,
+      provider: row.provider,
+      country: row.country,
+      institutionId: row.institution_id,
+      institutionName: row.institution_name,
+      status: row.status,
+      lastSyncedAt: row.last_synced_at,
+      nextSyncAt: row.next_sync_at,
+      consentExpiresAt: row.consent_expires_at,
+      errorCode: row.error_code,
+      errorMessage: row.error_message,
+    })),
   };
 }
 

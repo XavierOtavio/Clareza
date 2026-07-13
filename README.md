@@ -10,6 +10,8 @@ The interface explicitly identifies fictitious demonstration data. The mock Open
 - Supabase-backed accounts, transactions, categories, categorization rules, import jobs, budgets, goals, bank connection metadata, and audit events.
 - Manual account and transaction creation, account detail views, and the option to exclude an account from financial totals.
 - Labelled mock bank connection with idempotent transaction import behind `BankDataProvider`.
+- Configurable Enable Banking AIS adapter with its official sandbox flow, RS256 request authentication, short-lived callback state, consent lifecycle, manual renewal/revocation, and scheduled read-only synchronisation.
+- Balance snapshots, synchronisation jobs, incremental lookback, retries with exponential backoff, circuit breaking, and pending-to-booked transaction reconciliation.
 - Transaction search, account/category/status filters, sorting, CSV import/export, and persisted category corrections stored separately from source data.
 - Configurable, prioritized categorization rules that respect user corrections and apply to existing and newly imported transactions.
 - CSV column mapping, Portuguese and ISO dates, decimal validation, partial-error reporting, and idempotent duplicate detection.
@@ -43,7 +45,7 @@ Requirements: Node.js 22.13 or newer, npm, and a Supabase project.
 
    ```text
    SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+   SUPABASE_SECRET_KEY=your-server-only-secret-key
    ```
 
 4. Start the application:
@@ -71,13 +73,24 @@ Each accepted row receives a SHA-256 fingerprint derived from account, date, amo
 
 ## Environment variables
 
-Copy `.env.example` to `.env.local`. Never commit `.env.local` or expose `SUPABASE_SERVICE_ROLE_KEY` through a `NEXT_PUBLIC_` variable.
+Copy `.env.example` to `.env.local`. Never commit `.env.local` or expose `SUPABASE_SECRET_KEY` through a `NEXT_PUBLIC_` variable.
 
 `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are reserved for the future authenticated browser client. The current demonstration API uses only the server-side URL and service-role key.
 
-## Open Banking boundary
+## Open Banking
 
-`lib/banking/provider.ts` defines the provider-agnostic contract and the active demonstration implementation. A real launch requires a licensed Account Information Service Provider, callback and webhook verification, encrypted tokens, consent lifecycle handling, and independent legal and security review.
+`lib/banking/provider.ts` defines the provider-agnostic contract. The default `mock` mode is entirely local and fictitious. To exercise the real Enable Banking API against its sandbox institutions, create a sandbox application in the Enable Banking control panel, upload the corresponding self-signed certificate, and set:
+
+```text
+BANK_DATA_PROVIDER=enablebanking
+BANK_DATA_ENVIRONMENT=sandbox
+ENABLE_BANKING_APPLICATION_ID=...
+ENABLE_BANKING_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+NEXT_PUBLIC_APP_URL=https://your-preview-domain.vercel.app
+CRON_SECRET=...
+```
+
+The application obtains the institution catalogue from Enable Banking, redirects authentication and consent outside Clareza, and never receives bank login credentials. Every server request uses a short-lived RS256 JWT signed in memory; the private key never reaches the browser or database. Enable Banking sandbox and production applications are separate. Production mode exists as a configuration boundary, but must not be enabled until AISP coverage, contracts, authentication, RLS isolation, legal review, and independent security testing are complete.
 
 ## Deploying to Vercel
 

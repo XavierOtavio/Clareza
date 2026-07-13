@@ -20,6 +20,8 @@ export interface ProviderConnection {
   status: ConnectionStatus;
   redirectUrl?: string;
   consentExpiresAt?: string;
+  consentId?: string;
+  rawStatus?: string;
 }
 
 export interface ProviderAccount {
@@ -29,6 +31,8 @@ export interface ProviderAccount {
   currency: string;
   bookedBalanceCents: number;
   availableBalanceCents: number;
+  balanceAsOf?: string;
+  maskedIdentifier?: string;
 }
 
 export interface ProviderTransaction {
@@ -40,6 +44,8 @@ export interface ProviderTransaction {
   currency: string;
   status: "pending" | "booked";
   bookedAt: string;
+  valueAt?: string;
+  pendingTransactionId?: string;
 }
 
 export interface BankDataProvider {
@@ -49,7 +55,7 @@ export interface BankDataProvider {
   fetchAccounts(connectionId: string): Promise<ProviderAccount[]>;
   fetchBalances(connectionId: string, accountIds: string[]): Promise<ProviderAccount[]>;
   fetchTransactions(connectionId: string, since?: string): Promise<ProviderTransaction[]>;
-  refreshConnection(connectionId: string): Promise<ProviderConnection>;
+  refreshConnection(connectionId: string, redirectUri?: string, state?: string, institutionId?: string): Promise<ProviderConnection>;
   revokeConsent(connectionId: string): Promise<void>;
 }
 
@@ -74,7 +80,7 @@ export class MockBankDataProvider implements BankDataProvider {
       institutionId,
       institutionName: institution.name,
       status: "connected" as const,
-      consentExpiresAt: "2026-10-08T12:00:00.000Z",
+      consentExpiresAt: new Date(Date.now() + 90 * 86_400_000).toISOString(),
     };
   }
 
@@ -104,13 +110,15 @@ export class MockBankDataProvider implements BankDataProvider {
     ];
   }
 
-  async refreshConnection(connectionId: string) {
+  async refreshConnection(connectionId: string, _redirectUri?: string, _state?: string) {
+    void _redirectUri;
+    void _state;
     return {
       id: connectionId,
       institutionId: "pt-demo-atlantico",
       institutionName: "Banco Atlântico — Sandbox",
       status: "connected" as const,
-      consentExpiresAt: "2026-10-08T12:00:00.000Z",
+      consentExpiresAt: new Date(Date.now() + 90 * 86_400_000).toISOString(),
     };
   }
 

@@ -8,7 +8,8 @@ This repository is deployable to Vercel as a functional demonstration. It is not
 - Supabase PostgreSQL migration with constraints, indexes, workspace membership, and RLS policies.
 - Server-only persistence client and no Cloudflare runtime dependency.
 - Integer minor-unit money fields and deterministic financial calculations.
-- Labelled mock Open Banking provider and idempotent provider transaction identifiers.
+- Provider-agnostic Open Banking boundary with labelled local mock and a configurable Enable Banking AIS sandbox implementation.
+- Hashed single-use callback state, consent lifecycle, incremental jobs, balance snapshots, retries, circuit breaker, scheduled synchronisation, revocation, and pending-to-booked reconciliation.
 - Explicitly fictitious data and a non-persistent fallback when Supabase is absent.
 - Server-validated CSV import with explicit mappings, row-level error counts, and stable duplicate fingerprints.
 - Prioritized categorization rules and versioned user category overlays that preserve normalized source fields.
@@ -18,8 +19,10 @@ This repository is deployable to Vercel as a functional demonstration. It is not
 - Implement Supabase Auth, MFA or passkeys, secure recovery, and server-side user/workspace resolution.
 - Replace fixed demonstration service-role operations with user-scoped clients; reserve service-role access for verified callbacks and background jobs.
 - Test cross-workspace reads, inserts, updates, and deletes against RLS.
-- Select and contract a licensed AISP with verified Portuguese and EU coverage.
-- Implement callback state, consent renewal, webhook signatures, encrypted tokens, incremental synchronisation, pending-to-booked reconciliation, retries, rate limiting, and circuit breaking.
+- Contract the chosen licensed AISP and independently verify the exact Portuguese/EU institutions and data products required at launch; the current Enable Banking configuration is an engineering integration, not a regulatory approval.
+- Replace the fixed demo workspace before enabling production provider mode. Add per-user authorization to connection, refresh, revoke, and sync operations; test those paths against RLS.
+- Add distributed rate limiting and a shared circuit state appropriate for serverless concurrency. The current circuit breaker is in-process and provider rate-limit responses are retried conservatively.
+- Add signed webhook handling if the contracted provider offers a suitable Bank Account Data webhook. This slice uses an authenticated Vercel schedule and manual sync.
 - Extend the source/overlay model to transaction splits, tags, attachments, merchant normalization, refunds, and pending-to-booked reconciliation.
 - Add private document storage, personal data export and erasure, retention, anonymisation, encrypted backups, restoration tests, incident response, and secret rotation.
 - Complete DPIA/privacy work, terms, consent records, supplier contracts, security assessment, penetration testing, accessibility audit, and operational runbooks.
@@ -29,7 +32,8 @@ This repository is deployable to Vercel as a functional demonstration. It is not
 
 - The finance API uses one fixed demonstration workspace and a server-only Supabase service-role client.
 - CSV imports are limited to 2 MB and recent import history; production requires malware-safe document handling, asynchronous large-file jobs, retention limits, and downloadable error reports.
-- Open Banking is a labelled mock; it proves the interface and deduplication boundary, not bank coverage or regulatory compliance.
+- Open Banking defaults to a labelled local mock. The Enable Banking sandbox calls the real provider API but only exposes provider and bank test environments; it does not prove production bank coverage, regulatory status, uptime, or data completeness.
+- Enable Banking requests use short-lived JWTs signed in server memory. Production needs a reviewed RSA key-generation, secret-storage, access-control, rotation, revocation, and incident-recovery procedure.
 - Forecasts are labelled scenarios, not advice or guarantees.
 - PDF export uses browser print-to-PDF rather than an archived server-rendered report.
 - Family invitations, documents, investments, debt amortisation, recurring-item detection, AI insights, and complete data erasure remain roadmap work.
